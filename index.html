@@ -13294,39 +13294,41 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const grp = L.layerGroup();
     let n = 0;
+    // Show EVERY other section faded (roads = dashed line, parking = dashed
+    // polygon); tap one to make it the active section. Name-chips only on
+    // smaller parks to avoid clutter/lag on big ones (e.g. CAHA ~1900 routes).
+    const showChips = SECTIONS.length <= 60;
     SECTIONS.forEach(sub => {
       if (!sub || sub.id === curId) return;
-      const isSub = haveIds ? !bundleIds[sub.id] : !!sub._userAdded;
-      if (!isSub || sub.type !== 'area') return;            // parking-area subsections
-      const ring = sub.alignment;
-      if (!Array.isArray(ring) || ring.length < 3) return;  // need a real polygon
-      const poly = L.polygon(ring, {
-        color: '#C85A2B', weight: 2, dashArray: '5 4',
-        fillColor: '#C85A2B', fillOpacity: 0.12,
-        interactive: true, bubblingMouseEvents: false, pane: 'overlayPane',
-      });
-      poly.on('click', (e) => {
+      const align = sub.alignment;
+      if (!Array.isArray(align) || align.length < 2) return;
+      const isArea = sub.type === 'area' && align.length >= 3;
+      const layer = isArea
+        ? L.polygon(align, { color: '#C85A2B', weight: 2, dashArray: '5 4', fillColor: '#C85A2B', fillOpacity: 0.10, interactive: true, bubblingMouseEvents: false, pane: 'overlayPane' })
+        : L.polyline(align, { color: '#C85A2B', weight: 2, dashArray: '5 4', opacity: 0.55, interactive: true, bubblingMouseEvents: false, pane: 'overlayPane' });
+      layer.on('click', (e) => {
         if (e && e.originalEvent && L.DomEvent) L.DomEvent.stopPropagation(e.originalEvent);
         if (drawState && drawState.tool) return;
         if (relocateState && relocateState.active) return;
         showView('field', sub.id);
       });
       try {
-        poly.bindTooltip(esc(sub.name || 'Subsection') + ' — tap to open',
+        layer.bindTooltip(esc(sub.name || 'Section') + ' — tap to open',
           { sticky: true, direction: 'top', opacity: 0.95, className: 'rw-feature-tooltip' });
       } catch (_) {}
-      grp.addLayer(poly);
-      // Name chip at the polygon centroid.
-      const cLat = ring.reduce((a, p) => a + p[0], 0) / ring.length;
-      const cLng = ring.reduce((a, p) => a + p[1], 0) / ring.length;
-      grp.addLayer(L.marker([cLat, cLng], {
-        interactive: false,
-        icon: L.divIcon({
-          className: 'rw-sub-outline-label',
-          html: '<div class="sub-outline-chip">' + esc(sub.name || 'Subsection') + '</div>',
-          iconSize: null, iconAnchor: [0, 0],
-        }),
-      }));
+      grp.addLayer(layer);
+      if (showChips) {
+        const cLat = align.reduce((a, p) => a + p[0], 0) / align.length;
+        const cLng = align.reduce((a, p) => a + p[1], 0) / align.length;
+        grp.addLayer(L.marker([cLat, cLng], {
+          interactive: false,
+          icon: L.divIcon({
+            className: 'rw-sub-outline-label',
+            html: '<div class="sub-outline-chip">' + esc(sub.name || 'Section') + '</div>',
+            iconSize: null, iconAnchor: [0, 0],
+          }),
+        }));
+      }
       n++;
     });
     if (n) { grp.addTo(state.map); state.mapLayers.subOutlines = grp; }
