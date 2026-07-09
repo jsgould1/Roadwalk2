@@ -1,7 +1,12 @@
-# --- Client / project data — NOT committed (AECOM data restriction) ---
-# NPS/AECOM project data: park shapefiles, RIP reports, scope tables, test data.
-# Regenerate locally with the scripts in tools/ from the source GDBs/PDFs/xlsx.
-data/
+# --- Project data ---
+# Ignore park shapefiles, RIP PDFs, GDB exports, test data by default (large /
+# regenerate locally with tools/). BUT keep the public NPS RIP route tables +
+# scope tables so the app runs on a fresh clone.
+data/*
+!data/_rip/
+data/_rip/*
+!data/_rip/route_ids.json
+!data/_rip/scope.json
 
 # --- Reference material (large; donor RoadWalk source + stashed skeleton) ---
 reference/

@@ -1,0 +1,938 @@
+{
+ "CALO": {
+  "0400": {
+   "section_name": "CALO-400",
+   "route_name": "Charles Street",
+   "type": "road",
+   "start": [
+    34.686923,
+    -76.527718
+   ],
+   "end": [
+    34.686008,
+    -76.526296
+   ]
+  },
+  "0401": {
+   "section_name": "CALO-401",
+   "route_name": "Fuel Farm Road",
+   "type": "road",
+   "start": [
+    34.68616,
+    -76.526593
+   ],
+   "end": [
+    34.686298,
+    -76.527098
+   ]
+  },
+  "0402": {
+   "section_name": "CALO-402",
+   "route_name": "Cape Point Administrative Road",
+   "type": "road",
+   "start": [
+    34.686967,
+    -76.527785
+   ],
+   "end": [
+    34.689736,
+    -76.529302
+   ]
+  },
+  "0900": {
+   "section_name": "CALO-900",
+   "route_name": "Visitor Parking",
+   "type": "parking",
+   "start": [
+    34.685344,
+    -76.527343
+   ],
+   "end": null
+  },
+  "0901": {
+   "section_name": "CALO-901",
+   "route_name": "Picnic Area Parking Lot",
+   "type": "parking",
+   "start": [
+    34.684718,
+    -76.528395
+   ],
+   "end": null
+  },
+  "0902": {
+   "section_name": "CALO-902",
+   "route_name": "Staff Parking Lot",
+   "type": "parking",
+   "start": [
+    34.686084,
+    -76.526107
+   ],
+   "end": null
+  },
+  "0903": {
+   "section_name": "CALO-903",
+   "route_name": "Maintenance Parking Lot",
+   "type": "parking",
+   "start": [
+    34.689865,
+    -76.528309
+   ],
+   "end": null
+  },
+  "0904": {
+   "section_name": "CALO-904",
+   "route_name": "Core Sound Waterfowl Musuem & Heritage Center Parking",
+   "type": "parking",
+   "start": [
+    34.686948,
+    -76.528395
+   ],
+   "end": null
+  }
+ },
+ "CARL": {
+  "0400AZ": {
+   "section_name": "CARL-0400AZ",
+   "route_name": "Front Drive Enterance",
+   "type": "road",
+   "start": [
+    35.274079,
+    -82.446771
+   ],
+   "end": [
+    35.271587,
+    -82.447189
+   ]
+  },
+  "0400BZ": {
+   "section_name": "CARL-0400BZ",
+   "route_name": "The Y",
+   "type": "road",
+   "start": [
+    35.271493,
+    -82.447824
+   ],
+   "end": [
+    35.271685,
+    -82.447372
+   ]
+  },
+  "0400CZ": {
+   "section_name": "CARL-0400CZ",
+   "route_name": "The Port Cochere",
+   "type": "road",
+   "start": [
+    35.271617,
+    -82.447298
+   ],
+   "end": [
+    35.27141,
+    -82.447388
+   ]
+  },
+  "0900": {
+   "section_name": "CARL-900",
+   "route_name": "Visitor Parking",
+   "type": "parking",
+   "start": [
+    35.273433,
+    -82.444752
+   ],
+   "end": null
+  }
+ },
+ "CAHA": {
+  "0010": {
+   "section_name": "CAHA-10",
+   "route_name": "BI RD State Highway 12",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0012": {
+   "section_name": "CAHA-12",
+   "route_name": "HI RD Light House Road",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0202": {
+   "section_name": "CAHA-202",
+   "route_name": "BI RD Lighthouse Bay Drive",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0210": {
+   "section_name": "CAHA-210",
+   "route_name": "BI RD Lifeboat Station Road",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0215": {
+   "section_name": "CAHA-215",
+   "route_name": "BI RD Salvo Day Use Access",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0225AZ": {
+   "section_name": "CAHA-0225AZ",
+   "route_name": "HI RD Cape Point Campground Crossover A",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0225BZ": {
+   "section_name": "CAHA-0225BZ",
+   "route_name": "HI RD Cape Point Campground Crossover B",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0225CZ": {
+   "section_name": "CAHA-0225CZ",
+   "route_name": "HI RD Cape Point Campground Crossover C",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0225GZ": {
+   "section_name": "CAHA-0225GZ",
+   "route_name": "HI RD Cape Point Campground Crossover G",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0225HZ": {
+   "section_name": "CAHA-0225HZ",
+   "route_name": "HI RD Cape Point Campground Crossover H",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0225IZ": {
+   "section_name": "CAHA-0225IZ",
+   "route_name": "HI RD Cape Point Campground Crossover I",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0225JZ": {
+   "section_name": "CAHA-0225JZ",
+   "route_name": "HI RD Cape Point Campground Crossover J",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0225Z": {
+   "section_name": "CAHA-0225Z",
+   "route_name": "HI RD Cape Point Campground Perimeter Loop Road",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0227AZ": {
+   "section_name": "CAHA-0227AZ",
+   "route_name": "HI RD Frisco Campground Crossover A",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0227BZ": {
+   "section_name": "CAHA-0227BZ",
+   "route_name": "HI RD Frisco Campground Crossover B",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0227CZ": {
+   "section_name": "CAHA-0227CZ",
+   "route_name": "HI RD Frisco Campground Crossover C",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0227DZ": {
+   "section_name": "CAHA-0227DZ",
+   "route_name": "HI RD Frisco Campground Crossover D",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0227EZ": {
+   "section_name": "CAHA-0227EZ",
+   "route_name": "HI RD Frisco Campground Crossover E",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0227FZ": {
+   "section_name": "CAHA-0227FZ",
+   "route_name": "HI RD Frisco Campground Crossover F",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0227Z": {
+   "section_name": "CAHA-0227Z",
+   "route_name": "HI RD Frisco Campground Perimeter Loop Road",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0234AZ": {
+   "section_name": "CAHA-0234AZ",
+   "route_name": "OI RD Ocracoke Campground Crossover A",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0234BZ": {
+   "section_name": "CAHA-0234BZ",
+   "route_name": "OI RD Ocracoke Campground Crossover B",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0234CZ": {
+   "section_name": "CAHA-0234CZ",
+   "route_name": "OI RD Ocracoke Campground Crossover C",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0234Z": {
+   "section_name": "CAHA-0234Z",
+   "route_name": "OI RD Ocracoke Campground Perimeter Loop Road",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0237": {
+   "section_name": "CAHA-237",
+   "route_name": "OI RD Airport Access / Ramp 70",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0240": {
+   "section_name": "CAHA-240",
+   "route_name": "HI RD Lighthouse Access Road",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0241": {
+   "section_name": "CAHA-241",
+   "route_name": "OI RD Water Plant Road",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0250": {
+   "section_name": "CAHA-250",
+   "route_name": "HI RD Old Lighthouse Site Road",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0400": {
+   "section_name": "CAHA-400",
+   "route_name": "BI RD Park Service Road",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0405": {
+   "section_name": "CAHA-405",
+   "route_name": "BI RD Bodie Island Yard Road",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0410": {
+   "section_name": "CAHA-410",
+   "route_name": "HI RD Loggerhead Lane",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0411": {
+   "section_name": "CAHA-411",
+   "route_name": "HI RD Cabin Road",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0417": {
+   "section_name": "CAHA-417",
+   "route_name": "OI RD Ocracoke Residence Access",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0901": {
+   "section_name": "CAHA-901",
+   "route_name": "BI RD Whalebone Information Station Parking",
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0903AZ": {
+   "section_name": "CAHA-0903AZ",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0903BZ": {
+   "section_name": "CAHA-0903BZ",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0906": {
+   "section_name": "CAHA-906",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0911": {
+   "section_name": "CAHA-911",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0912": {
+   "section_name": "CAHA-912",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0913": {
+   "section_name": "CAHA-913",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0916": {
+   "section_name": "CAHA-916",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0917": {
+   "section_name": "CAHA-917",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0919": {
+   "section_name": "CAHA-919",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0921": {
+   "section_name": "CAHA-921",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0922": {
+   "section_name": "CAHA-922",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0923": {
+   "section_name": "CAHA-923",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0924": {
+   "section_name": "CAHA-924",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0927": {
+   "section_name": "CAHA-927",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0928": {
+   "section_name": "CAHA-928",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0929AZ": {
+   "section_name": "CAHA-0929AZ",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0929BZ": {
+   "section_name": "CAHA-0929BZ",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0930": {
+   "section_name": "CAHA-930",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0931": {
+   "section_name": "CAHA-931",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0932": {
+   "section_name": "CAHA-932",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0933": {
+   "section_name": "CAHA-933",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0934": {
+   "section_name": "CAHA-934",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0935": {
+   "section_name": "CAHA-935",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0936": {
+   "section_name": "CAHA-936",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0937": {
+   "section_name": "CAHA-937",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0939": {
+   "section_name": "CAHA-939",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0941": {
+   "section_name": "CAHA-941",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0942": {
+   "section_name": "CAHA-942",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0944": {
+   "section_name": "CAHA-944",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0945AZ": {
+   "section_name": "CAHA-0945AZ",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0945BZ": {
+   "section_name": "CAHA-0945BZ",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0945EZ": {
+   "section_name": "CAHA-0945EZ",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0946": {
+   "section_name": "CAHA-946",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0947": {
+   "section_name": "CAHA-947",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0951": {
+   "section_name": "CAHA-951",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  }
+ },
+ "FORA": {
+  "0010": {
+   "section_name": "FORA-10",
+   "route_name": null,
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0011": {
+   "section_name": "FORA-11",
+   "route_name": null,
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0401": {
+   "section_name": "FORA-401",
+   "route_name": null,
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0901": {
+   "section_name": "FORA-901",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0902": {
+   "section_name": "FORA-902",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0904": {
+   "section_name": "FORA-904",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0908": {
+   "section_name": "FORA-908",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  }
+ },
+ "GUCO": {
+  "0010E": {
+   "section_name": "GUCO-0010E",
+   "route_name": null,
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0010W": {
+   "section_name": "GUCO-0010W",
+   "route_name": null,
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0011": {
+   "section_name": "GUCO-11",
+   "route_name": null,
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0900": {
+   "section_name": "GUCO-900",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0902": {
+   "section_name": "GUCO-902",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0903": {
+   "section_name": "GUCO-903",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0904": {
+   "section_name": "GUCO-904",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0905": {
+   "section_name": "GUCO-905",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0906": {
+   "section_name": "GUCO-906",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0907": {
+   "section_name": "GUCO-907",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0908": {
+   "section_name": "GUCO-908",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0909": {
+   "section_name": "GUCO-909",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0911": {
+   "section_name": "GUCO-911",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  }
+ },
+ "MOCR": {
+  "0010": {
+   "section_name": "MOCR-10",
+   "route_name": null,
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0200": {
+   "section_name": "MOCR-200",
+   "route_name": null,
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0900": {
+   "section_name": "MOCR-900",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0901": {
+   "section_name": "MOCR-901",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0902": {
+   "section_name": "MOCR-902",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0903": {
+   "section_name": "MOCR-903",
+   "route_name": null,
+   "type": "parking",
+   "start": null,
+   "end": null
+  }
+ },
+ "WRBR": {
+  "0010AZ": {
+   "section_name": "WRBR-0010AZ",
+   "route_name": "WB RD PARK ENTRANCE ROAD MAIN",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0010BZ": {
+   "section_name": "WRBR-0010BZ",
+   "route_name": "WB RD PARK ENTRANCE ROAD FEE STATION SPUR",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0010CZ": {
+   "section_name": "WRBR-0010CZ",
+   "route_name": "WB RD PARK ENTRANCE ROAD SPUR AT V ISITOR CENTER",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0010DZ": {
+   "section_name": "WRBR-0010DZ",
+   "route_name": "WB RD PARK ENTRANCE ROAD EXIT SPUR",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0010EZ": {
+   "section_name": "WRBR-0010EZ",
+   "route_name": "WB RD PARK ENTRANCE ROAD SPU R WITH PYLON LOOP ROAD",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0401": {
+   "section_name": "WRBR-401",
+   "route_name": "W B RD MAINTENANCE ACCESS ROAD",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0500": {
+   "section_name": "WRBR-500",
+   "route_name": "W B RD PYLON LOOP ROAD",
+   "type": "road",
+   "start": null,
+   "end": null
+  },
+  "0900": {
+   "section_name": "WRBR-900",
+   "route_name": "WB RD VIS ITOR CENTER PARKING",
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0901": {
+   "section_name": "WRBR-901",
+   "route_name": "WB R D AIR STR IP ACCESS R OAD AND PAR KING",
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0902": {
+   "section_name": "WRBR-902",
+   "route_name": "WB RD MAINTENANCE P ARKING",
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0903": {
+   "section_name": "WRBR-903",
+   "route_name": "WB R D PILOTS FACILITY PAR KING",
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0907AZ": {
+   "section_name": "WRBR-0907AZ",
+   "route_name": "WB R D MONUMENT PAR KING A",
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0907BZ": {
+   "section_name": "WRBR-0907BZ",
+   "route_name": "WB R D MONUMENT PAR KING B",
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0907CZ": {
+   "section_name": "WRBR-0907CZ",
+   "route_name": "WB R D MONUMENT PAR KING C",
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0907DZ": {
+   "section_name": "WRBR-0907DZ",
+   "route_name": "WB R D MONUMENT PAR KING D",
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0907EZ": {
+   "section_name": "WRBR-0907EZ",
+   "route_name": "WB R D MONUMENT PAR KING E",
+   "type": "parking",
+   "start": null,
+   "end": null
+  },
+  "0910": {
+   "section_name": "WRBR-910",
+   "route_name": "WB RD ENTRANCE FEE STATION PARKING",
+   "type": "parking",
+   "start": null,
+   "end": null
+  }
+ }
+}
