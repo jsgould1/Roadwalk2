@@ -1,0 +1,14 @@
+# --- Client / project data — NOT committed (AECOM data restriction) ---
+# NPS/AECOM project data: park shapefiles, RIP reports, scope tables, test data.
+# Regenerate locally with the scripts in tools/ from the source GDBs/PDFs/xlsx.
+data/
+
+# --- Reference material (large; donor RoadWalk source + stashed skeleton) ---
+reference/
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+*.tmp
