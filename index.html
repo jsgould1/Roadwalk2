@@ -101,6 +101,7 @@
 <script src="modules/route-tools.js" defer></script>
 <script src="modules/aecom-toggle.js" defer></script>
 <script src="modules/scope-assign.js" defer></script>
+<script src="modules/flip-sta.js" defer></script>
 
 <style>
 /* ============================================================
@@ -14262,6 +14263,27 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   // Expose the live Leaflet map so overlay modules (e.g. the NPS⇄AECOM toggle)
   // can draw on it without reaching into this closure.
   window._RW.getMap = function () { try { return state.map || null; } catch (_) { return null; } };
+
+  // Flip a route's stationing: reverse its alignment so 0+00 moves to the other
+  // end, then re-project any pins onto the reversed line. Persists + rerenders.
+  window._RW.flipActiveStationing = function () {
+    const id = state.sectionId;
+    const sec = SECTIONS.find((s) => s && s.id === id);
+    if (!sec || !Array.isArray(sec.alignment) || sec.alignment.length < 2) return false;
+    sec.alignment.reverse();
+    (sec.pins || []).forEach((p) => {
+      if (!p || !p.geometry) return;
+      const c = p.geometry.type === 'Point' ? p.geometry.coordinates : (p.geometry.coordinates && p.geometry.coordinates[0]);
+      if (!c) return;
+      const r = projectOntoAlignment({ lat: c[1], lng: c[0] }, sec.alignment);
+      p.sta_ft = r[0];
+      p.sta = fmtSta(r[0]);
+      if (p.attrs) p.attrs.side = r[2] === -1 ? 'L' : r[2] === 1 ? 'R' : (p.attrs.side || 'C');
+    });
+    if (window._RW.persistSections) window._RW.persistSections();
+    if (window._RW.rerender) window._RW.rerender();
+    return true;
+  };
 
   window._RW.loadBundle = async function (bundle, opts) {
     opts = opts || {};
