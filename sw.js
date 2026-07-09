@@ -10,10 +10,10 @@
    ---------------------------------------------------------------- */
 'use strict';
 
-var CACHE_VERSION = 'roadwalk-v279';
+var CACHE_VERSION = 'roadwalk2-v1';   // namespaced (shares github.io origin w/ legacy RoadWalk SW)
 
 // Pre-cached on install so the app opens even on a fully cold start.
-var PRECACHE = ['./', './index.html', './roadwalk.html'];
+var PRECACHE = ['./', './index.html'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(
@@ -63,7 +63,7 @@ self.addEventListener('fetch', function (e) {
         return res;
       }).catch(function () {
         // Offline and uncached — for page navigations, fall back to the app shell.
-        if (req.mode === 'navigate') return caches.match('./roadwalk.html');
+        if (req.mode === 'navigate') return caches.match('./index.html');
         return cached;
       });
       return cached || network;

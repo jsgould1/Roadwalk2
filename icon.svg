@@ -1,12 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- Full-bleed navy background — safe for both "any" and "maskable" use -->
-  <rect width="512" height="512" fill="#0B3D66"/>
-  <!-- Perspective road -->
-  <path d="M210 152 L302 152 L398 402 L114 402 Z" fill="#EAE5D8"/>
-  <!-- Dashed centre line -->
-  <path d="M256 170 L256 388" fill="none" stroke="#0B3D66"
-        stroke-width="22" stroke-dasharray="38 30"/>
-  <!-- Location pin sitting at the head of the road -->
-  <circle cx="256" cy="120" r="52" fill="#E8A838"/>
-  <circle cx="256" cy="120" r="21" fill="#0B3D66"/>
+  <!-- Roadwalk2 app icon — teal, to differentiate from RoadWalk (navy). -->
+  <rect width="512" height="512" fill="#0E7C66"/>
+  <!-- Road: white S-curve band -->
+  <path d="M168 468 C168 344 356 340 356 212 C356 128 304 104 256 104"
+        fill="none" stroke="#EAF3F0" stroke-width="64" stroke-linecap="round"/>
+  <!-- Dashed centreline -->
+  <path d="M168 468 C168 344 356 340 356 212 C356 128 304 104 256 104"
+        fill="none" stroke="#0E7C66" stroke-width="9" stroke-dasharray="24 24" stroke-linecap="round"/>
+  <!-- "2" badge -->
+  <circle cx="392" cy="392" r="88" fill="#F4B400" stroke="#0E7C66" stroke-width="12"/>
+  <text x="392" y="434" font-family="'Segoe UI',Arial,sans-serif"
+        font-weight="700" font-size="126" text-anchor="middle" fill="#0B2A22">2</text>
 </svg>

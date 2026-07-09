@@ -1,13 +1,13 @@
 {
-  "name": "RoadWalk — AECOM Pavement Inspection",
-  "short_name": "RoadWalk",
-  "description": "Field data collection for roadway and parking-lot pavement inspections.",
-  "start_url": "./roadwalk.html",
+  "name": "Roadwalk2 — AECOM Pavement Inspection",
+  "short_name": "Roadwalk2",
+  "description": "Field data collection for roadway and parking-lot pavement inspections (NPS parks).",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#F5F1EA",
-  "theme_color": "#0B3D66",
+  "background_color": "#0E7C66",
+  "theme_color": "#0E7C66",
   "icons": [
     {
       "src": "./icon.svg",
