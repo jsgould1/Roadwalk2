@@ -28,7 +28,15 @@
   const distFt = (a, b) => { const m = (a[0] + b[0]) / 2 * Math.PI / 180; return Math.hypot((b[1] - a[1]) * Math.cos(m) * 364567, (b[0] - a[0]) * 364567); };
   const centroid = (r) => { let x = 0, y = 0; r.forEach((c) => { x += c[0]; y += c[1]; }); return [x / r.length, y / r.length]; };
 
-  const activeUnit = () => (window.RW2Library && window.RW2Library.getActive ? window.RW2Library.getActive() : null);
+  const activeUnit = () => {
+    const a = (window.RW2Library && window.RW2Library.getActive) ? window.RW2Library.getActive() : null;
+    if (a) return a;
+    // Fallback: derive the park from the loaded sections' id prefix (e.g. "CALO-PK-001" → "CALO")
+    // so SCOPE works for any loaded bundle, not only library-opened parks.
+    const S = sections();
+    for (const s of S) { const m = /^([A-Za-z]+)/.exec(s.id || ''); if (m) return m[1].toUpperCase(); }
+    return null;
+  };
   const scopeFor = (u) => SCOPE[u] || SCOPE[(u || '').split('_')[0]] || null;
   const ripFor = (u) => RIP[u] || RIP[(u || '').split('_')[0]] || {};
   const sections = () => (window._RW && window._RW.SECTIONS) || [];
@@ -67,6 +75,46 @@
     const m = window._RW && window._RW.getMap && window._RW.getMap();
     if (m && scRec.start) m.setView([scRec.start[0], scRec.start[1]], 18);
   }
+
+  // ---- tap-to-assign mode -----------------------------------------------
+  // "Tap on map" for a scope route → next section tapped on the map gets that
+  // Route ID (the donor section click handler calls assignSection when active).
+  let _mode = { active: false, unit: null, routeId: null, scRec: null };
+  function enterAssign(unit, routeId, scRec) {
+    _mode = { active: true, unit, routeId, scRec };
+    hide();                                             // close the panel
+    const mapTab = document.querySelector('[data-module="map"]');
+    if (mapTab) mapTab.click();                         // go to the map
+    if (scRec.start) { const m = window._RW.getMap && window._RW.getMap(); if (m) m.setView([scRec.start[0], scRec.start[1]], 18); }
+    showBanner();
+  }
+  function cancelAssign() { _mode = { active: false, unit: null, routeId: null, scRec: null }; hideBanner(); }
+  function assignSection(section) {
+    if (!_mode.active || !section) return;
+    assign(section, _mode.unit, _mode.routeId, _mode.scRec);
+    toast(`Assigned ${_mode.routeId} → ${section.name || section.id}`);
+    cancelAssign();
+    setTimeout(show, 350);                              // re-open panel to continue
+  }
+  function showBanner() {
+    hideBanner();
+    const b = document.createElement('div');
+    b.id = 'rw2-assign-banner';
+    b.style.cssText = 'position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:99997;background:#e8710a;color:#fff;padding:9px 16px;border-radius:999px;font:600 13px "IBM Plex Sans",system-ui;box-shadow:0 3px 14px rgba(0,0,0,.3);display:flex;align-items:center;gap:12px;max-width:92%';
+    b.innerHTML = `📍 Tap the road/lot for <b style="margin:0 2px">${_mode.routeId}</b> ${(_mode.scRec.route_name || '')} <button id="rw2-assign-cancel" style="border:0;background:rgba(255,255,255,.25);color:#fff;border-radius:6px;padding:3px 9px;cursor:pointer;font:inherit">Cancel</button>`;
+    document.body.appendChild(b);
+    b.querySelector('#rw2-assign-cancel').onclick = cancelAssign;
+  }
+  function hideBanner() { const b = document.getElementById('rw2-assign-banner'); if (b) b.remove(); }
+  function toast(msg) {
+    const t = document.createElement('div');
+    t.style.cssText = 'position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:99999;background:#12233b;color:#fff;padding:9px 16px;border-radius:999px;font:600 13px "IBM Plex Sans",system-ui;box-shadow:0 3px 14px rgba(0,0,0,.3);max-width:92%';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2200);
+  }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && _mode.active) cancelAssign(); });
+  window.RW2ScopeAssignMode = { get active() { return _mode.active; }, assignSection };
 
   // ---- panel -------------------------------------------------------------
   function ensurePanel() {
@@ -111,7 +159,10 @@
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
           <div><b style="font-family:ui-monospace,monospace;color:#12233b">${rid}</b> <span style="color:#1a2330">${rec.route_name || ''}</span>
             <span style="font-size:11px;color:#8a949f">· ${rec.type}</span></div>
-          <button data-fly="${rid}" style="border:1px solid #d3dae1;background:#f6f8fa;border-radius:7px;padding:3px 9px;cursor:pointer;font-size:12px;white-space:nowrap">📍 Fly to</button>
+          <span style="white-space:nowrap">
+            <button data-fly="${rid}" style="border:1px solid #d3dae1;background:#f6f8fa;border-radius:7px;padding:3px 9px;cursor:pointer;font-size:12px">📍 Fly to</button>
+            <button data-tap="${rid}" style="border:1px solid #e8710a;background:#fff5ec;color:#b45309;border-radius:7px;padding:3px 9px;cursor:pointer;font-size:12px;margin-left:4px">🎯 Tap-assign</button>
+          </span>
         </div>
         <div style="margin-top:7px;display:flex;flex-direction:column;gap:4px">
           ${cands.length ? cands.map((c, i) => `<button data-assign="${rid}" data-uid="${c.s.uid}" style="text-align:left;border:1px solid ${c.nameMatch ? '#b7cdec' : '#e3e8ee'};background:${c.nameMatch ? '#eef4fd' : '#fff'};border-radius:7px;padding:6px 9px;cursor:pointer;font-size:12.5px">
@@ -121,6 +172,7 @@
     }
     body.innerHTML = html;
     body.querySelectorAll('[data-fly]').forEach((b) => b.onclick = () => flyTo(sc[b.getAttribute('data-fly')]));
+    body.querySelectorAll('[data-tap]').forEach((b) => b.onclick = () => { const r = b.getAttribute('data-tap'); enterAssign(unit, r, sc[r]); });
     body.querySelectorAll('[data-assign]').forEach((b) => b.onclick = () => {
       const rid = b.getAttribute('data-assign'), uid = b.getAttribute('data-uid');
       const sec = sections().find((s) => s.uid === uid);

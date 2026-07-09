@@ -101,7 +101,7 @@
 <script src="modules/library.js" defer></script>
 <script src="modules/route-tools.js" defer></script>
 <script src="modules/aecom-toggle.js" defer></script>
-<script src="modules/scope-assign.js" defer></script>
+<script src="modules/scope-assign.js?v=4" defer></script>
 <script src="modules/flip-sta.js" defer></script>
 
 <style>
@@ -13312,6 +13312,12 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         if (e && e.originalEvent && L.DomEvent) L.DomEvent.stopPropagation(e.originalEvent);
         if (drawState && drawState.tool) return;
         if (relocateState && relocateState.active) return;
+        // Scope "tap to assign" mode: tapping a section assigns the selected
+        // in-scope route to it instead of switching the active section.
+        if (window.RW2ScopeAssignMode && window.RW2ScopeAssignMode.active
+            && typeof window.RW2ScopeAssignMode.assignSection === 'function') {
+          window.RW2ScopeAssignMode.assignSection(sub); return;
+        }
         showView('field', sub.id);
       });
       try {
