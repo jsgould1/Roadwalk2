@@ -103,7 +103,7 @@
 <script src="modules/aecom-toggle.js" defer></script>
 <script src="modules/scope-assign.js?v=5" defer></script>
 <script src="modules/sections-table.js" defer></script>
-<script src="modules/route-menu.js" defer></script>
+<script src="modules/route-menu.js?v=2" defer></script>
 <script src="modules/flip-sta.js" defer></script>
 
 <style>
@@ -14349,46 +14349,115 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     return true;
   };
 
-  // MERGE — chain two road segments end-to-end into one route. `keep` wins its
-  // id/name/route_id; `absorb` is folded in (alignment joined at the closest
-  // endpoints, pins moved over + re-stationed) and removed.
+  const _rw2Restation = (pin, align) => {
+    if (!pin || !pin.geometry || !pin.geometry.coordinates) return;
+    let c = pin.geometry.coordinates;
+    while (Array.isArray(c) && Array.isArray(c[0])) c = c[0];
+    if (!Array.isArray(c) || c.length < 2) return;
+    const r = projectOntoAlignment({ lat: c[1], lng: c[0] }, align);
+    pin.sta_ft = Math.round(r[0] * 10) / 10;
+    pin.sta = fmtSta(r[0]);
+  };
+
+  // MERGE — chain two road segments into one route. `keep` (the road the popup
+  // was opened on) KEEPS its stationing: its 0+00 and direction are preserved,
+  // and `absorb` is appended at keep's END, oriented so whichever of its
+  // endpoints is nearer the join connects first. `absorb`'s pins move over and
+  // everything is re-stationed along the joined line; `absorb` is removed.
+  // (keep is never reversed — that used to flip the primary road backwards.)
   window._RW.chainSections = function (keepId, absorbId) {
     const keep = _rw2Sec(keepId), absorb = _rw2Sec(absorbId);
     if (!keep || !absorb || keep === absorb) return { ok: false, reason: 'invalid' };
     if (keep.type !== 'linear' || absorb.type !== 'linear') return { ok: false, reason: 'roads only' };
     const A = keep.alignment, B = absorb.alignment;
     if (!Array.isArray(A) || A.length < 2 || !Array.isArray(B) || B.length < 2) return { ok: false, reason: 'no geometry' };
-    const rev = (a) => a.slice().reverse();
-    // Four ways to join; pick the pairing with the smallest gap.
-    const opts = [
-      { gap: havFt(A[A.length - 1], B[0]),            first: A,      second: B },
-      { gap: havFt(A[A.length - 1], B[B.length - 1]), first: A,      second: rev(B) },
-      { gap: havFt(A[0], B[0]),                       first: rev(A), second: B },
-      { gap: havFt(A[0], B[B.length - 1]),            first: rev(A), second: rev(B) },
-    ].sort((x, y) => x.gap - y.gap)[0];
-    // Drop a coincident junction vertex (< ~1 ft) so we don't leave a zero-length segment.
-    const second = (opts.gap < 1) ? opts.second.slice(1) : opts.second;
-    const newAlign = opts.first.concat(second);
+    const end = A[A.length - 1];
+    const gStart = havFt(end, B[0]), gEnd = havFt(end, B[B.length - 1]);
+    const second = (gEnd < gStart) ? B.slice().reverse() : B;   // orient absorb, never touch keep
+    const gap = Math.min(gStart, gEnd);
+    const tail = (gap < 1) ? second.slice(1) : second;          // drop a coincident junction vertex
+    const newAlign = A.concat(tail);
     keep.alignment = newAlign;
-    // Re-station every pin (keep's own may have flipped) onto the joined line.
-    const restation = (pin) => {
-      if (!pin || !pin.geometry || !pin.geometry.coordinates) return;
-      let c = pin.geometry.coordinates;
-      while (Array.isArray(c) && Array.isArray(c[0])) c = c[0];
-      if (!Array.isArray(c) || c.length < 2) return;
-      const r = projectOntoAlignment({ lat: c[1], lng: c[0] }, newAlign);
-      pin.sta_ft = Math.round(r[0] * 10) / 10;
-      pin.sta = fmtSta(r[0]);
-    };
-    (keep.pins || []).forEach(restation);
-    (absorb.pins || []).forEach(restation);
+    (keep.pins || []).forEach((p) => _rw2Restation(p, newAlign));
+    (absorb.pins || []).forEach((p) => _rw2Restation(p, newAlign));
     keep.pins = (keep.pins || []).concat(absorb.pins || []);
+    // merged_from lists the ORIGINAL segment ids (so Unmerge can rebuild them
+    // from the pristine library bundle). Keep it flat.
     keep.merged_from = [].concat(keep.merged_from || [keep.id], absorb.merged_from || [absorb.id]);
     const ai = SECTIONS.indexOf(absorb);
     if (ai >= 0) SECTIONS.splice(ai, 1);
     if (state.sectionId === absorbId && typeof showView === 'function') showView('field', keepId);
     else { if (window._RW.persistSections) window._RW.persistSections(); if (window._RW.rerender) window._RW.rerender(); }
-    return { ok: true, added_pins: (absorb.pins || []).length };
+    return { ok: true, added_pins: (absorb.pins || []).length, join_gap_ft: Math.round(gap) };
+  };
+
+  // Rebuild a live SECTIONS entry from a pristine library-bundle section
+  // (bundle coords are [lng,lat]; live wants [lat,lng]). Mirrors applyBundle.
+  function _bundleSectionToLive(s) {
+    const alignmentLL = (s.alignment || []).map((c) => [c[1], c[0]]);
+    const subAlignmentsLL = (s.sub_alignments || []).map((sa) => ({
+      role: sa.role, name: sa.name, lengthFt: sa.length_ft,
+      coords: (sa.coordinates || []).map((c) => [c[1], c[0]]),
+    }));
+    const pinCount = (s.pins || []).length;
+    return {
+      id: s.id, name: s.name, type: s.type, status: 'prog', featureCount: pinCount,
+      meta: s.project_code || '', kickoff: true,
+      center: alignmentLL[Math.floor(alignmentLL.length / 2)] || null,
+      alignment: alignmentLL, subAlignments: subAlignmentsLL,
+      pathwebRefs: s.pathweb_refs, projectCode: s.project_code, mpStart: s.mp_start, mpEnd: s.mp_end,
+      area_sqft: s.area_sqft, uid: s.uid, route_id: s.route_id || '', faclocid: s.faclocid || '',
+      rip: s.rip || null, in_scope: !!s.in_scope, scope_name: s.scope_name || '',
+      scope_section: s.scope_section || '', scope_flag: !!s.scope_flag,
+      src_name: s.src_name || s.name, merged_from: s.merged_from || null,
+      pins: (s.pins || []).map((p) => Object.assign({}, p, { _bundle: true })),
+    };
+  }
+
+  // UNMERGE — split a merged route back into its original segments, rebuilt
+  // from the pristine park bundle in the library. The absorbed segment(s) are
+  // found by GEOMETRY: a bundle road that's currently missing from the working
+  // set and whose vertices nearly all lie on this route's alignment must have
+  // been chained into it. This works on any merged route (incl. ones merged
+  // before Unmerge existed) without relying on stored provenance. Edits made
+  // AFTER the merge (e.g. a re-assigned Route ID) revert to the imported
+  // originals — a clean revert of the merge.
+  window._RW.unmergeSection = async function (id) {
+    const keep = _rw2Sec(id);
+    if (!keep) return { ok: false, reason: 'not found' };
+    const mergedAlign = Array.isArray(keep.alignment) ? keep.alignment : null;
+    if (!mergedAlign) return { ok: false, reason: 'no geometry' };
+    const unit = String(keep.id.split('-')[0] || '').toUpperCase();
+    let bundle = null;
+    try {
+      if (window.RW2Library && window.RW2Library.get) {
+        const rec = await window.RW2Library.get(unit);
+        bundle = rec && rec.bundle;
+      }
+    } catch (_) {}
+    if (!bundle || !Array.isArray(bundle.sections)) return { ok: false, reason: 'no library bundle' };
+    const keepOrig = bundle.sections.find((s) => s.id === keep.id);
+    if (!keepOrig) return { ok: false, reason: 'original not in bundle' };
+    const present = new Set(SECTIONS.map((s) => s.id));
+    const TOL = 8;   // ft — chained vertices are copied verbatim, so this is generous
+    const onMerged = (ll) => mergedAlign.some((v) => havFt(v, ll) < TOL);
+    const absorbed = [];
+    for (const s of bundle.sections) {
+      if (s.id === keep.id || present.has(s.id) || s.type !== 'linear') continue;
+      const verts = (s.alignment || []).map((c) => [c[1], c[0]]);
+      if (verts.length < 2) continue;
+      const hit = verts.filter(onMerged).length;
+      if (hit / verts.length >= 0.85) absorbed.push(s);
+    }
+    if (!absorbed.length) return { ok: false, reason: 'no absorbed segment found' };
+    const live = [keepOrig].concat(absorbed).map(_bundleSectionToLive);
+    const idx = SECTIONS.indexOf(keep);
+    SECTIONS.splice(idx, 1, ...live);
+    const wasActive = state.sectionId === id;
+    if (window._RW.persistSections) window._RW.persistSections();
+    if (wasActive && typeof showView === 'function') showView('field', live[0].id);
+    else if (window._RW.rerender) window._RW.rerender();
+    return { ok: true, restored: live.length, absorbed: absorbed.map((s) => s.id) };
   };
 
   window._RW.loadBundle = async function (bundle, opts) {

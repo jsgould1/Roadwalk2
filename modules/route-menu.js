@@ -39,6 +39,7 @@
          <button class="fp-btn" data-act="flip" id="rrp-flip"><span class="fp-ico">⇄</span><span class="fp-lbl">Flip STA</span></button>
          <button class="fp-btn" data-act="move"><span class="fp-ico">⊹</span><span class="fp-lbl">Move</span></button>
          <button class="fp-btn" data-act="merge" id="rrp-merge"><span class="fp-ico">⛓</span><span class="fp-lbl">Merge</span></button>
+         <button class="fp-btn" data-act="unmerge" id="rrp-unmerge"><span class="fp-ico">⤴</span><span class="fp-lbl">Unmerge</span></button>
          <button class="fp-btn fp-danger fp-span" data-act="del"><span class="fp-ico">✕</span><span class="fp-lbl">Delete</span></button>
        </div>
        <div class="fp-actions" id="rrp-assign" style="display:none;max-height:46vh;overflow:auto;grid-template-columns:1fr"></div>
@@ -75,9 +76,11 @@
     p.querySelector('#rrp-chip').style.background = road ? '#C85A2B' : '#0B3D66';
     const rid = sec.route_id ? ' · ' + sec.route_id : '';
     p.querySelector('#rrp-name').textContent = (sec.name || sec.id) + rid;
-    // Flip STA + Merge are road-only.
+    // Flip STA + Merge are road-only. Unmerge only shows on a merged route.
     p.querySelector('#rrp-flip').style.display = road ? '' : 'none';
     p.querySelector('#rrp-merge').style.display = road ? '' : 'none';
+    const merged = Array.isArray(sec.merged_from) && sec.merged_from.length >= 2;
+    p.querySelector('#rrp-unmerge').style.display = (road && merged) ? '' : 'none';
     p.querySelector('#rrp-confirm').classList.remove('fp-conf-visible');
     p.querySelector('#rrp-assign').style.display = 'none';
     p.querySelector('#rrp-actions').style.display = '';
@@ -118,6 +121,13 @@
     if (act === 'assign') { showAssign(sec); return; }
     if (act === 'move')   { startMove(sec); return; }
     if (act === 'merge')  { startMerge(sec); return; }
+    if (act === 'unmerge') {
+      const id = sec.id; close();
+      Promise.resolve(RW().unmergeSection ? RW().unmergeSection(id) : { ok: false })
+        .then((r) => toast(r && r.ok ? 'Unmerged into ' + r.restored + ' segments'
+                                     : 'Can’t unmerge (' + ((r && r.reason) || 'error') + ')', !(r && r.ok)));
+      return;
+    }
     if (act === 'del')    { document.getElementById('rrp-confirm').classList.add('fp-conf-visible'); return; }
   }
 
