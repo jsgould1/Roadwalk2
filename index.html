@@ -101,8 +101,9 @@
 <script src="modules/library.js" defer></script>
 <script src="modules/route-tools.js" defer></script>
 <script src="modules/aecom-toggle.js" defer></script>
-<script src="modules/scope-assign.js?v=4" defer></script>
+<script src="modules/scope-assign.js?v=5" defer></script>
 <script src="modules/sections-table.js" defer></script>
+<script src="modules/route-menu.js" defer></script>
 <script src="modules/flip-sta.js" defer></script>
 
 <style>
@@ -13048,9 +13049,12 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
           pane: 'overlayPane',
         }).addTo(state.map);
         state.mapLayers.alignmentHit = alignmentHit;
-        alignmentHit.on('click', () => {
+        alignmentHit.on('click', (e) => {
           if (drawState && drawState.tool) return;
           if (relocateState && relocateState.active) return;
+          if (window.RW2RouteMenu && window.RW2RouteMenu.handleSectionTap
+              && window.RW2RouteMenu.handleSectionTap(sec, e)) return;
+          if (window.RW2RouteMenu && window.RW2RouteMenu.open) { window.RW2RouteMenu.open(sec, e); return; }
           startSectionVertexEdit(sec);
         });
       } else {
@@ -13155,13 +13159,17 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         if (relocateState && relocateState.active) return;
         // Placing an AECOM copy → tapping the centerline sets its start.
         if (_grDupState && _grDupState.active) { _grDupPlaceAt(e.latlng); return; }
+        // Move / merge mode taps this centerline → let the route popup consume it.
+        if (window.RW2RouteMenu && window.RW2RouteMenu.handleSectionTap
+            && window.RW2RouteMenu.handleSectionTap(sec, e)) return;
         // A different section's centerline → select it first (scrolls the SLD).
         if (stripCurrentSec && stripCurrentSec.id !== sec.id) {
           const [staFt] = projectOntoAlignment(e.latlng, sec.alignment);
           openStrip(sec, staFt ?? 0);
           return;
         }
-        // Tapping the active section's centerline opens shape-edit mode.
+        // Tapping the active section's centerline opens the route action popup.
+        if (window.RW2RouteMenu && window.RW2RouteMenu.open) { window.RW2RouteMenu.open(sec, e); return; }
         startSectionVertexEdit(sec);
       });
       }  // end if (!isAreaSection)
@@ -13313,6 +13321,10 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         if (e && e.originalEvent && L.DomEvent) L.DomEvent.stopPropagation(e.originalEvent);
         if (drawState && drawState.tool) return;
         if (relocateState && relocateState.active) return;
+        // Route-popup move/merge mode: tapping a faded section is the target
+        // (merge partner, or move destination) — consume the tap.
+        if (window.RW2RouteMenu && window.RW2RouteMenu.handleSectionTap
+            && window.RW2RouteMenu.handleSectionTap(sub, e)) return;
         // Scope "tap to assign" mode: tapping a section assigns the selected
         // in-scope route to it instead of switching the active section.
         if (window.RW2ScopeAssignMode && window.RW2ScopeAssignMode.active
@@ -14291,6 +14303,92 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     if (window._RW.persistSections) window._RW.persistSections();
     if (window._RW.rerender) window._RW.rerender();
     return true;
+  };
+
+  // ── Roadwalk2 route-popup hooks (modules/route-menu.js) ───────────────────
+  const _rw2Sec = (id) => SECTIONS.find((s) => s && s.id === id) || null;
+
+  // EDIT SHAPE — drag/add/remove this route's alignment vertices.
+  window._RW.startSectionShapeEdit = function (id) {
+    const sec = _rw2Sec(id);
+    if (sec && typeof startSectionVertexEdit === 'function') startSectionVertexEdit(sec);
+  };
+
+  // DELETE — drop a route from the working set; hand the map to a neighbor.
+  window._RW.deleteSection = function (id) {
+    const idx = SECTIONS.findIndex((s) => s && s.id === id);
+    if (idx < 0) return false;
+    const wasActive = state.sectionId === id;
+    SECTIONS.splice(idx, 1);
+    if (window._RW.persistSections) window._RW.persistSections();
+    if (wasActive && typeof showView === 'function') {
+      if (SECTIONS[0]) showView('field', SECTIONS[0].id);
+    } else if (window._RW.rerender) window._RW.rerender();
+    return true;
+  };
+
+  // MOVE — rigidly translate a route (alignment + sub-alignments + pins) by a
+  // lat/lng delta so its centroid lands on the tapped point. Stationing is
+  // preserved (pins shift with the shape).
+  window._RW.moveSection = function (id, dLat, dLng) {
+    const sec = _rw2Sec(id);
+    if (!sec || !Array.isArray(sec.alignment)) return false;
+    sec.alignment = sec.alignment.map((p) => [p[0] + dLat, p[1] + dLng]);
+    (sec.subAlignments || []).forEach((sa) => {
+      if (Array.isArray(sa.coords)) sa.coords = sa.coords.map((p) => [p[0] + dLat, p[1] + dLng]);
+    });
+    const shiftGeo = (c) => {
+      if (typeof c[0] === 'number') return [c[0] + dLng, c[1] + dLat];   // [lng,lat] leaf
+      return c.map(shiftGeo);
+    };
+    (sec.pins || []).forEach((p) => {
+      if (p && p.geometry && p.geometry.coordinates) p.geometry.coordinates = shiftGeo(p.geometry.coordinates);
+    });
+    if (window._RW.persistSections) window._RW.persistSections();
+    if (window._RW.rerender) window._RW.rerender();
+    return true;
+  };
+
+  // MERGE — chain two road segments end-to-end into one route. `keep` wins its
+  // id/name/route_id; `absorb` is folded in (alignment joined at the closest
+  // endpoints, pins moved over + re-stationed) and removed.
+  window._RW.chainSections = function (keepId, absorbId) {
+    const keep = _rw2Sec(keepId), absorb = _rw2Sec(absorbId);
+    if (!keep || !absorb || keep === absorb) return { ok: false, reason: 'invalid' };
+    if (keep.type !== 'linear' || absorb.type !== 'linear') return { ok: false, reason: 'roads only' };
+    const A = keep.alignment, B = absorb.alignment;
+    if (!Array.isArray(A) || A.length < 2 || !Array.isArray(B) || B.length < 2) return { ok: false, reason: 'no geometry' };
+    const rev = (a) => a.slice().reverse();
+    // Four ways to join; pick the pairing with the smallest gap.
+    const opts = [
+      { gap: havFt(A[A.length - 1], B[0]),            first: A,      second: B },
+      { gap: havFt(A[A.length - 1], B[B.length - 1]), first: A,      second: rev(B) },
+      { gap: havFt(A[0], B[0]),                       first: rev(A), second: B },
+      { gap: havFt(A[0], B[B.length - 1]),            first: rev(A), second: rev(B) },
+    ].sort((x, y) => x.gap - y.gap)[0];
+    // Drop a coincident junction vertex (< ~1 ft) so we don't leave a zero-length segment.
+    const second = (opts.gap < 1) ? opts.second.slice(1) : opts.second;
+    const newAlign = opts.first.concat(second);
+    keep.alignment = newAlign;
+    // Re-station every pin (keep's own may have flipped) onto the joined line.
+    const restation = (pin) => {
+      if (!pin || !pin.geometry || !pin.geometry.coordinates) return;
+      let c = pin.geometry.coordinates;
+      while (Array.isArray(c) && Array.isArray(c[0])) c = c[0];
+      if (!Array.isArray(c) || c.length < 2) return;
+      const r = projectOntoAlignment({ lat: c[1], lng: c[0] }, newAlign);
+      pin.sta_ft = Math.round(r[0] * 10) / 10;
+      pin.sta = fmtSta(r[0]);
+    };
+    (keep.pins || []).forEach(restation);
+    (absorb.pins || []).forEach(restation);
+    keep.pins = (keep.pins || []).concat(absorb.pins || []);
+    keep.merged_from = [].concat(keep.merged_from || [keep.id], absorb.merged_from || [absorb.id]);
+    const ai = SECTIONS.indexOf(absorb);
+    if (ai >= 0) SECTIONS.splice(ai, 1);
+    if (state.sectionId === absorbId && typeof showView === 'function') showView('field', keepId);
+    else { if (window._RW.persistSections) window._RW.persistSections(); if (window._RW.rerender) window._RW.rerender(); }
+    return { ok: true, added_pins: (absorb.pins || []).length };
   };
 
   window._RW.loadBundle = async function (bundle, opts) {

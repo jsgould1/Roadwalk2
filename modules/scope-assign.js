@@ -195,5 +195,33 @@
   setInterval(mount, 1200);
   setTimeout(mount, 600);
 
-  window.RW2Scope = { show, render };
+  // ---- helpers for the route popup's "Assign ID" action ------------------
+  // Route IDs already claimed by an assigned section in this park.
+  function assignedIds() {
+    return new Set(sections().filter((s) => s.route_id).map((s) => s.route_id));
+  }
+  // Every in-scope route for a park, flagged assigned/unassigned — feeds the picker.
+  function scopeList(unit) {
+    const sc = scopeFor(unit) || {};
+    const used = assignedIds();
+    return Object.keys(sc).map((rid) => ({
+      rid, route_name: sc[rid].route_name || '', type: sc[rid].type || '',
+      assigned: used.has(rid),
+    })).sort((a, b) => (a.assigned - b.assigned) || a.rid.localeCompare(b.rid));
+  }
+  // Assign a Route ID to a section — in-scope record when one exists, else a
+  // plain RIP id (no in_scope flag). Persists + rerenders either way.
+  function assignId(section, rid) {
+    if (!section || !rid) return;
+    const unit = activeUnit();
+    const scRec = (scopeFor(unit) || {})[rid];
+    if (scRec) { assign(section, unit, rid, scRec); return; }
+    section.route_id = rid;
+    const rec = ripFor(unit)[rid]; if (rec) section.rip = rec;
+    if (window._RW && window._RW.persistSections) window._RW.persistSections();
+    if (window._RW && window._RW.rerender) window._RW.rerender();
+  }
+  function clearId(section) { if (section) unassign(section); }
+
+  window.RW2Scope = { show, render, scopeList, assignId, clearId, activeUnit };
 })();
