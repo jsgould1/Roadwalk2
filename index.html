@@ -11467,7 +11467,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   // --- IndexedDB project cache -------------------------------------------
   // Stores the active project bundle so it survives page reload without
   // requiring the user to re-pick a file or re-fetch the manifest.
-  const _IDB_NAME  = 'roadwalk-v1';
+  const _IDB_NAME  = 'roadwalk2-active-v1';
   const _IDB_STORE = 'active-project';
 
   function _openProjectDB() {
@@ -27292,7 +27292,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
                                tha_entries:[...], incidents:[...] }
                       Safety module data; not date-keyed (project-level).
      --------------------------------------------------------------- */
-  const RW_IDB_NAME    = 'RoadWalkDB';
+  const RW_IDB_NAME    = 'RoadWalk2DB';
   const RW_IDB_VERSION = 2;          // v2: inspections re-keyed pin_id → ulid
 
   /** Promise-based open of the RoadWalk field data IDB. */
@@ -27414,7 +27414,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
      intercepts createTile(), checks this IDB first, and caches misses.
      We open the IDB now so the schema exists before Phase 2 code runs.
      --------------------------------------------------------------- */
-  const TILE_IDB_NAME    = 'RoadWalkTiles_v1';
+  const TILE_IDB_NAME    = 'RoadWalk2Tiles_v1';
   const TILE_IDB_VERSION = 1;
   const TILE_STORE       = 'tiles';        // key: 'layerName_z_x_y', value: dataURL string
 
@@ -28075,7 +28075,8 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
        lastSavedAt    : ISO string,
      }
      --------------------------------------------------------------- */
-  const LS_KEY = 'rw_v1';
+  const LS_KEY = 'rw2_v1';   // Roadwalk2-namespaced (was 'rw_v1'; shares the
+                             // jsgould1.github.io origin with legacy RoadWalk)
 
   /** Read lean state from localStorage; returns {} if missing/corrupt. */
   function lsLoad() {
@@ -36250,7 +36251,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   }
 
   /* ===================== GEO-PHOTOS — storage ===================== */
-  var DB_NAME = 'RoadWalkGeoPhotos_v1', DB_STORE = 'geophotos';
+  var DB_NAME = 'RoadWalk2GeoPhotos_v1', DB_STORE = 'geophotos';
   function openDB() {
     return new Promise(function (res, rej) {
       var rq = indexedDB.open(DB_NAME, 1);
