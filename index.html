@@ -104,6 +104,7 @@
 <script src="modules/scope-assign.js?v=5" defer></script>
 <script src="modules/sections-table.js" defer></script>
 <script src="modules/route-menu.js?v=2" defer></script>
+<script src="modules/scope-pins.js" defer></script>
 <script src="modules/flip-sta.js" defer></script>
 
 <style>
@@ -14389,6 +14390,26 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     if (state.sectionId === absorbId && typeof showView === 'function') showView('field', keepId);
     else { if (window._RW.persistSections) window._RW.persistSections(); if (window._RW.rerender) window._RW.rerender(); }
     return { ok: true, added_pins: (absorb.pins || []).length, join_gap_ft: Math.round(gap) };
+  };
+
+  // Orient a road so its 0+00 (alignment start) is the end NEAREST the given
+  // point — used by the scope-pin import to set stationing direction from the
+  // "Start" pin. Reverses + re-stations pins only when the far end is closer.
+  // `silent` skips persist/rerender so a batch can do one refresh at the end.
+  window._RW.setSectionStartNear = function (id, lat, lng, silent) {
+    const sec = _rw2Sec(id);
+    if (!sec || sec.type !== 'linear' || !Array.isArray(sec.alignment) || sec.alignment.length < 2) return false;
+    const A = sec.alignment;
+    const flip = havFt(A[A.length - 1], [lat, lng]) < havFt(A[0], [lat, lng]);
+    if (flip) {
+      A.reverse();
+      (sec.pins || []).forEach((p) => _rw2Restation(p, A));
+      if (!silent) {
+        if (window._RW.persistSections) window._RW.persistSections();
+        if (window._RW.rerender) window._RW.rerender();
+      }
+    }
+    return flip;
   };
 
   // Rebuild a live SECTIONS entry from a pristine library-bundle section
