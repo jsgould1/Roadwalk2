@@ -40,6 +40,8 @@
          <button class="fp-btn" data-act="move"><span class="fp-ico">⊹</span><span class="fp-lbl">Move</span></button>
          <button class="fp-btn" data-act="merge" id="rrp-merge"><span class="fp-ico">⛓</span><span class="fp-lbl">Merge</span></button>
          <button class="fp-btn" data-act="unmerge" id="rrp-unmerge"><span class="fp-ico">⤴</span><span class="fp-lbl">Unmerge</span></button>
+         <button class="fp-btn" data-act="redraw" id="rrp-redraw"><span class="fp-ico">✏️</span><span class="fp-lbl">Redraw</span></button>
+         <button class="fp-btn" data-act="islands" id="rrp-islands"><span class="fp-ico">⛏️</span><span class="fp-lbl">Cut Islands</span></button>
          <button class="fp-btn fp-danger fp-span" data-act="del"><span class="fp-ico">✕</span><span class="fp-lbl">Delete</span></button>
        </div>
        <div class="fp-actions" id="rrp-assign" style="display:none;max-height:46vh;overflow:auto;grid-template-columns:1fr"></div>
@@ -77,10 +79,13 @@
     const rid = sec.route_id ? ' · ' + sec.route_id : '';
     p.querySelector('#rrp-name').textContent = (sec.name || sec.id) + rid;
     // Flip STA + Merge are road-only. Unmerge only shows on a merged route.
+    // Redraw + Cut Islands are parking-lot (area) only.
     p.querySelector('#rrp-flip').style.display = road ? '' : 'none';
     p.querySelector('#rrp-merge').style.display = road ? '' : 'none';
     const merged = Array.isArray(sec.merged_from) && sec.merged_from.length >= 2;
     p.querySelector('#rrp-unmerge').style.display = (road && merged) ? '' : 'none';
+    p.querySelector('#rrp-redraw').style.display = road ? 'none' : '';
+    p.querySelector('#rrp-islands').style.display = road ? 'none' : '';
     p.querySelector('#rrp-confirm').classList.remove('fp-conf-visible');
     p.querySelector('#rrp-assign').style.display = 'none';
     p.querySelector('#rrp-actions').style.display = '';
@@ -128,6 +133,8 @@
                                      : 'Can’t unmerge (' + ((r && r.reason) || 'error') + ')', !(r && r.ok)));
       return;
     }
+    if (act === 'redraw')  { startRedraw(sec); return; }
+    if (act === 'islands') { startIslands(sec); return; }
     if (act === 'del')    { document.getElementById('rrp-confirm').classList.add('fp-conf-visible'); return; }
   }
 
@@ -208,14 +215,99 @@
     toast(r && r.ok ? 'Routes merged' : 'Merge failed', !(r && r.ok));
   }
 
+  // ---- Redraw outline / Cut islands (area sections) ---------------------
+  // A parking lot is an outer ring (sec.alignment) plus exclusion holes
+  // (sec.holes) for center islands. Redraw replaces the outer; Cut Islands
+  // adds holes by tracing them or picking existing polygons inside the lot.
+  let _island = null;       // { sec, origAlign, origHoles, removed:[{sec,idx}] }
+  let _islandPick = false;
+
+  function inPoly(pt, poly) {
+    const lat = pt[0], lng = pt[1]; let hit = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const yi = poly[i][0], xi = poly[i][1], yj = poly[j][0], xj = poly[j][1];
+      if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) hit = !hit;
+    }
+    return hit;
+  }
+  const cloneRing = (r) => r.map((p) => p.slice());
+
+  function startRedraw(sec) {
+    close();
+    if (!RW().traceRing || !RW().applyAreaGeometry) { toast('Redraw unavailable', true); return; }
+    toast('Trace the new boundary · tap ✓ Done');
+    RW().traceRing((ring) => {
+      if (ring && ring.length >= 3) { RW().applyAreaGeometry(sec.id, ring, sec.holes || []); toast('Boundary redrawn · area updated'); }
+    });
+  }
+
+  function startIslands(sec) {
+    close();
+    if (!RW().traceRing || !RW().applyAreaGeometry) { toast('Island tool unavailable', true); return; }
+    _island = { sec, origAlign: cloneRing(sec.alignment), origHoles: (sec.holes || []).map(cloneRing), removed: [] };
+    _islandPick = false;
+    showIslandBar();
+  }
+  function showIslandBar() {
+    if (!_island) return;
+    hideBanner();
+    const n = (_island.sec.holes || []).length;
+    const btn = (k, label, on) => `<button data-i="${k}" style="border:0;background:${on ? '#fff' : 'rgba(255,255,255,.25)'};color:${on ? '#0B3D66' : '#fff'};border-radius:6px;padding:3px 9px;cursor:pointer;font:inherit">${label}</button>`;
+    const b = document.createElement('div');
+    b.id = 'rw2-route-banner';
+    b.style.cssText = 'position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:99997;background:#0B3D66;color:#fff;padding:9px 14px;border-radius:999px;font:600 13px "IBM Plex Sans",system-ui;box-shadow:0 3px 14px rgba(0,0,0,.3);display:flex;align-items:center;gap:8px;max-width:96%;flex-wrap:wrap';
+    b.innerHTML = `⛏️ <b>${n}</b> island${n === 1 ? '' : 's'} cut ${btn('trace', '✏️ Trace')} ${btn('pick', '👆 Pick', _islandPick)} ${btn('done', '✓ Done')} ${btn('cancel', '✕ Cancel')}`;
+    document.body.appendChild(b);
+    b.querySelector('[data-i="trace"]').onclick = traceIsland;
+    b.querySelector('[data-i="pick"]').onclick = () => { _islandPick = !_islandPick; showIslandBar(); };
+    b.querySelector('[data-i="done"]').onclick = finishIslands;
+    b.querySelector('[data-i="cancel"]').onclick = cancelIslands;
+  }
+  function traceIsland() {
+    if (!_island) return;
+    _islandPick = false; hideBanner();
+    RW().traceRing((ring) => {
+      if (_island && ring && ring.length >= 3) {
+        const s = _island.sec;
+        s.holes = (s.holes || []).concat([ring]);
+        RW().applyAreaGeometry(s.id, s.alignment, s.holes);
+        toast('Island cut · area updated');
+      }
+      if (_island) showIslandBar();
+    });
+  }
+  function pickIsland(tapped) {
+    const base = _island && _island.sec;
+    if (!base || !tapped || tapped.id === base.id) return;
+    if (tapped.type !== 'area') { toast('Pick a parking polygon', true); return; }
+    if (!inPoly(centroid(tapped.alignment), base.alignment)) { toast('That polygon isn’t inside this lot', true); return; }
+    base.holes = (base.holes || []).concat([cloneRing(tapped.alignment)]);
+    const S = window._RW.SECTIONS; const idx = S.indexOf(tapped);
+    if (idx >= 0) { _island.removed.push({ sec: tapped, idx }); S.splice(idx, 1); }
+    RW().applyAreaGeometry(base.id, base.alignment, base.holes);
+    toast('Island excluded');
+    showIslandBar();
+  }
+  function finishIslands() { _island = null; _islandPick = false; hideBanner(); toast('Islands saved'); }
+  function cancelIslands() {
+    const st = _island; _island = null; _islandPick = false; hideBanner();
+    if (!st) return;
+    const S = window._RW.SECTIONS;
+    st.removed.sort((a, b) => a.idx - b.idx).forEach(({ sec, idx }) => { if (!S.find((x) => x.id === sec.id)) S.splice(Math.min(idx, S.length), 0, sec); });
+    st.sec.alignment = st.origAlign; st.sec.holes = st.origHoles;
+    if (RW().applyAreaGeometry) RW().applyAreaGeometry(st.sec.id, st.origAlign, st.origHoles);
+    toast('Reverted');
+  }
+
   // handleSectionTap: called by the donor's section click handlers. Returns
-  // true when a move/merge mode consumes the tap (so it doesn't switch/open).
+  // true when a mode consumes the tap (so it doesn't switch/open the popup).
   function handleSectionTap(sec, e) {
+    if (_island) { if (_islandPick) pickIsland(sec); return true; }   // islands mode owns taps
     if (_mode === 'merge') { finishMerge(sec); return true; }
     if (_mode === 'move')  { if (e && e.latlng) finishMove(e.latlng); return true; }
     return false;
   }
-  function modeActive() { return !!_mode; }
+  function modeActive() { return !!_mode || !!_island; }
 
   function endMode() {
     _mode = null; _target = null;

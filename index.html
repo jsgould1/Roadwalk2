@@ -103,7 +103,7 @@
 <script src="modules/aecom-toggle.js" defer></script>
 <script src="modules/scope-assign.js?v=5" defer></script>
 <script src="modules/sections-table.js" defer></script>
-<script src="modules/route-menu.js?v=2" defer></script>
+<script src="modules/route-menu.js?v=3" defer></script>
 <script src="modules/scope-pins.js" defer></script>
 <script src="modules/flip-sta.js" defer></script>
 
@@ -12663,6 +12663,14 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     if (areaSqFt >= 43560) return `${(areaSqFt / 43560).toFixed(2)} ac`;
     return `${Math.round(areaSqFt).toLocaleString()} sq ft`;
   }
+  // Leaflet polygon coords for an area section: outer ring, plus any exclusion
+  // holes (center islands) as inner rings. L.polygon([outer, hole1, …]) renders
+  // holes as cut-outs. Rings are [lat,lng]; a missing/empty holes list is a
+  // plain single ring so untouched sections behave exactly as before.
+  function _areaPolyLatLngs(sec) {
+    return (sec && Array.isArray(sec.holes) && sec.holes.length)
+      ? [sec.alignment].concat(sec.holes) : (sec && sec.alignment);
+  }
 
   // --- Forward (STA → lat/lng) helpers used by drawing on the strip -----
   function polylineLengthFt(coords) {
@@ -13029,7 +13037,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       const isAreaSection = sec.type === 'area';
       let alignmentHit = null;
       if (isAreaSection) {
-        state.mapLayers.alignment = L.polygon(sec.alignment, {
+        state.mapLayers.alignment = L.polygon(_areaPolyLatLngs(sec), {
           color: '#0B3D66',
           weight: 2.5,
           fillColor: '#0B3D66',
@@ -13039,7 +13047,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
           pane: 'overlayPane',
         }).addTo(state.map);
         // Invisible fat boundary outline — tapping it opens shape-edit mode.
-        alignmentHit = L.polygon(sec.alignment, {
+        alignmentHit = L.polygon(_areaPolyLatLngs(sec), {
           color: '#000',
           weight: 26,
           opacity: 0,          // invisible
@@ -13316,7 +13324,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       if (!Array.isArray(align) || align.length < 2) return;
       const isArea = sub.type === 'area' && align.length >= 3;
       const layer = isArea
-        ? L.polygon(align, { color: '#C85A2B', weight: 2, dashArray: '5 4', fillColor: '#C85A2B', fillOpacity: 0.10, interactive: true, bubblingMouseEvents: false, pane: 'overlayPane' })
+        ? L.polygon(_areaPolyLatLngs(sub), { color: '#C85A2B', weight: 2, dashArray: '5 4', fillColor: '#C85A2B', fillOpacity: 0.10, interactive: true, bubblingMouseEvents: false, pane: 'overlayPane' })
         : L.polyline(align, { color: '#C85A2B', weight: 2, dashArray: '5 4', opacity: 0.55, interactive: true, bubblingMouseEvents: false, pane: 'overlayPane' });
       layer.on('click', (e) => {
         if (e && e.originalEvent && L.DomEvent) L.DomEvent.stopPropagation(e.originalEvent);
@@ -14410,6 +14418,34 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       }
     }
     return flip;
+  };
+
+  // Set an area section's outer ring and/or exclusion holes (center islands),
+  // recompute its area (outer − holes), and refresh. Rings are [lat,lng];
+  // polygonAreaSqFt wants [lng,lat]. Used by the polygon-edit tool.
+  window._RW.applyAreaGeometry = function (id, outer, holes) {
+    const sec = _rw2Sec(id);
+    if (!sec || sec.type !== 'area') return false;
+    if (Array.isArray(outer) && outer.length >= 3) sec.alignment = outer;
+    sec.holes = (holes || []).filter((h) => Array.isArray(h) && h.length >= 3);
+    const toLngLat = (r) => r.map((p) => [p[1], p[0]]);
+    let a = polygonAreaSqFt(toLngLat(sec.alignment));
+    for (const h of sec.holes) a -= polygonAreaSqFt(toLngLat(h));
+    sec.area_sqft = Math.max(0, Math.round(a));
+    sec.center = sec.alignment[Math.floor(sec.alignment.length / 2)] || sec.center;
+    sec.meta = `${sec.projectCode || ''}${sec.area_sqft ? ` · ${(sec.area_sqft / 43560).toFixed(2)} ac` : ''}`;
+    if (window._RW.persistSections) window._RW.persistSections();
+    if (window._RW.rerender) window._RW.rerender();
+    return sec.area_sqft;
+  };
+
+  // Trace a fresh polygon ring by reusing the donor's polygon draw (tap
+  // vertices · ✓ Done · Esc to cancel) but hand the resulting ring back to a
+  // callback instead of building a pin. onDone receives the [lat,lng] ring, or
+  // null if the user cancelled. Consumed by the polygon-edit tool.
+  window._RW.traceRing = function (onDone) {
+    setDrawTool('polygon', null);   // runs cancelDraw() first, then arms the draw
+    _ringCallback = onDone || null;
   };
 
   // Rebuild a live SECTIONS entry from a pristine library-bundle section
@@ -20754,6 +20790,10 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     if (doneBtn) doneBtn.disabled = n < need;
   }
 
+  // When set (via window._RW.traceRing), a finished polygon draw hands its ring
+  // to this callback instead of building a pin feature. See the polygon-edit tool.
+  let _ringCallback = null;
+
   function setDrawTool(tool, kind) {
     // Toggle off if same tool+kind selected again
     if (drawState.tool === tool && drawState.kind === (kind || null)) {
@@ -20833,6 +20873,8 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     const dBan = $('#draw-banner');
     if (dBan) { dBan.classList.remove('open'); dBan.style.top = ''; }
     if (state.map && state.map.doubleClickZoom) state.map.doubleClickZoom.enable();
+    // Ring-trace aborted (Esc / ✗ / switched tools) → tell the polygon-edit tool.
+    if (_ringCallback) { const cb = _ringCallback; _ringCallback = null; try { cb(null); } catch (_) {} }
   }
 
   function _redrawTempPolyline() {
@@ -20979,6 +21021,14 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
 
   function finishDraw() {
     if (!drawState.tool) return;
+    // Ring-trace mode (polygon-edit tool): hand the ring back, don't make a pin.
+    if (_ringCallback) {
+      const ring = drawState.vertices.slice();
+      const cb = _ringCallback; _ringCallback = null;
+      cancelDraw();
+      cb(ring.length >= 3 ? ring : null);
+      return;
+    }
     const sec = SECTIONS.find(s => s.id === state.sectionId);
     if (!sec) { cancelDraw(); return; }
     const tool = drawState.tool;
