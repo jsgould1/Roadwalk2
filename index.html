@@ -12828,7 +12828,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       els.headerName.textContent   = isReplace ? (replaceSec?.name || 'Adjust centerline') : 'Draw alignment';
       requestAnimationFrame(() => {
         if (!state.map) {
-          const fallbackCenter = (replaceSec?.center) || (SECTIONS.length ? SECTIONS[0].center : [35.68, -83.52]);
+          const fallbackCenter = (replaceSec?.center) || (SECTIONS.length ? SECTIONS[0].center : HOME_CENTER);
           const stub = { id: '__trace__', center: fallbackCenter, alignment: null, pins: [] };
           initOrUpdateMap(stub);
           state.mapLayers._lastSecId = null;
@@ -12937,6 +12937,11 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     return !!p._bundle;
   }
 
+  // Default "home" map location — where a brand-new / empty project opens so
+  // you can start drawing from aerial imagery: 250 Apollo Drive, Chelmsford, MA.
+  const HOME_CENTER = [42.5995758, -71.3265357];
+  const HOME_ZOOM = 18;
+
   // --- Map initialization ------------------------------------------------
   function initOrUpdateMap(sec) {
     console.log('[initOrUpdateMap] sec=', sec?.id, 'map exists=', !!state.map);
@@ -12948,7 +12953,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         rotate: true,            // leaflet-rotate plugin — enables setBearing()
         rotateControl: false,    // we add our own rotate buttons in the stack
         bearing: 0,
-      }).setView(sec.center, 17);
+      }).setView((sec && sec.center) || HOME_CENTER, (sec && sec.center) ? 17 : HOME_ZOOM);
 
       // Basemap — obey the current settings choice (defaults to Nearmap for testing)
       setBasemap(state.settings.basemap || 'nearmap');
@@ -14356,6 +14361,17 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     _setProjectHeader(PROJECT.name);
     if (typeof renderSectionList === 'function') { try { renderSectionList('all'); } catch (_) {} }
     if (typeof window.renderDashboard === 'function') { try { window.renderDashboard('all'); } catch (_) {} }
+    return true;
+  };
+  // Default home location (250 Apollo Drive, Chelmsford, MA) + a recenter hook.
+  window._RW.HOME_CENTER = HOME_CENTER.slice();
+  window._RW.goHome = function (zoom) {
+    if (!state.map) return false;
+    try {
+      state.map.invalidateSize();
+      state.map.setView(HOME_CENTER, zoom || HOME_ZOOM);
+      if (!state.currentBasemap) setBasemap(state.settings.basemap || 'nearmap');
+    } catch (_) { return false; }
     return true;
   };
 
@@ -23954,7 +23970,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
           ? `${dk.answers.basics?.fromSta || '?'} → ${dk.answers.basics?.toSta || '?'} · ${dk.answers.basics?.pavementType || ''}`
           : `${dk.answers.basics?.area || 'draw boundary'} · ${dk.answers.basics?.pavementType || ''}`,
         kickoff: true,
-        center: [29.7321, -95.2589],
+        center: HOME_CENTER.slice(),
         alignment: null,
         kickoffAnswers: dk.answers,
       });
