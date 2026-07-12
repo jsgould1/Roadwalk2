@@ -107,7 +107,7 @@
 <script src="modules/scope-pins.js" defer></script>
 <script src="modules/geo-io.js?v=2" defer></script>
 <script src="modules/scope-data.js" defer></script>
-<script src="modules/file-hub.js" defer></script>
+<script src="modules/file-hub.js?v=2" defer></script>
 <script src="modules/flip-sta.js" defer></script>
 
 <style>
@@ -11471,11 +11471,13 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   // --- Project + sections -----------------------------------------------
   // In v1 these get populated from data/prewalk-bundle.json via loadPrewalkBundle().
   // The bundle contains real GRSM trial data (4 sections, 540 ghost pins).
+  // Blank by default — the app opens to the File hub with no project until you
+  // File → New or Open one (the old GRSM sample name is gone).
   let PROJECT = {
-    id: 'p1',
-    name: 'GRSM Pavement Preservation · 2026 Trial',
-    client: 'National Park Service — Great Smoky Mountains',
-    kickoffDate: 'Apr 24, 2026',
+    id: 'proj',
+    name: '',
+    client: '',
+    kickoffDate: '',
   };
 
   let SECTIONS = [];   // populated from prewalk bundle
@@ -12785,7 +12787,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     if (name === 'list') {
       els.backBtn.style.visibility = 'hidden';
       els.headerKicker.textContent = 'PROJECT';
-      const shortName = BUNDLE?.short_name || (PROJECT?.name || '').split('·')[0].trim() || 'Roadwalk2';
+      const shortName = BUNDLE?.short_name || (PROJECT?.name || '').split('·')[0].trim();
       els.headerName.textContent = shortName;
       const adjBtn = $('#adjust-cl-btn');
       if (adjBtn) adjBtn.hidden = true;
@@ -14341,7 +14343,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     const hn = document.getElementById('header-name'); if (hn) hn.textContent = String(nm || 'Untitled Project').split('·')[0].trim();
     const hk = document.getElementById('header-kicker'); if (hk) hk.textContent = 'PROJECT';
   }
-  window._RW.getProjectName = function () { return (typeof PROJECT !== 'undefined' && PROJECT && PROJECT.name) || 'Untitled Project'; };
+  window._RW.getProjectName = function () { return (typeof PROJECT !== 'undefined' && PROJECT && PROJECT.name) || ''; };
   window._RW.setProjectName = function (name) {
     if (!name) return false;
     PROJECT = PROJECT || {}; PROJECT.name = name; window.PROJECT = PROJECT;

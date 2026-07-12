@@ -83,7 +83,7 @@
 
   function render() {
     const host = $('mod-file'); if (!host) return;
-    const name = RW().getProjectName ? RW().getProjectName() : 'Untitled Project';
+    const name = (RW().getProjectName && RW().getProjectName()) || '';
     const S = sections();
     const lots = S.filter((s) => s.type === 'area').length, roads = S.length - lots;
     const inScope = S.filter((s) => s.in_scope).length;
@@ -94,10 +94,10 @@
            <div style="min-width:0">
              <div style="font-size:12px;color:#8a949f;text-transform:uppercase;letter-spacing:.6px">Project</div>
              <div style="display:flex;align-items:center;gap:8px">
-               <div id="fh-name" style="font-size:26px;font-weight:800;color:#12233b;line-height:1.1;overflow:hidden;text-overflow:ellipsis">${esc(name)}</div>
-               <button data-act="rename" title="Rename" style="border:0;background:transparent;cursor:pointer;font-size:16px;opacity:.55">✏️</button>
+               <div id="fh-name" style="font-size:26px;font-weight:800;color:${name ? '#12233b' : '#9aa4af'};line-height:1.1;overflow:hidden;text-overflow:ellipsis">${name ? esc(name) : 'No project open'}</div>
+               ${name ? '<button data-act="rename" title="Rename" style="border:0;background:transparent;cursor:pointer;font-size:16px;opacity:.55">✏️</button>' : ''}
              </div>
-             <div style="font-size:13px;color:#5b6673;margin-top:3px">${S.length} route${S.length === 1 ? '' : 's'} · ${roads} road${roads === 1 ? '' : 's'} · ${lots} lot${lots === 1 ? '' : 's'} · <b style="color:#0e7c66">${inScope}</b> in scope</div>
+             <div style="font-size:13px;color:#5b6673;margin-top:3px">${name ? `${S.length} route${S.length === 1 ? '' : 's'} · ${roads} road${roads === 1 ? '' : 's'} · ${lots} lot${lots === 1 ? '' : 's'} · <b style="color:#0e7c66">${inScope}</b> in scope` : 'Start with <b>New</b> or <b>Open</b> below.'}</div>
            </div>
            <div style="display:flex;gap:8px">
              <button data-act="gotoRoutes" style="border:1px solid #d3dae1;background:#fff;border-radius:10px;padding:9px 14px;cursor:pointer;font-weight:600;color:#12233b">📊 Routes →</button>
