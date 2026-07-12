@@ -344,5 +344,5 @@
     setTimeout(() => t.remove(), 2200);
   }
 
-  window.RW2RouteMenu = { open, close, handleSectionTap, modeActive };
+  window.RW2RouteMenu = { open, close, handleSectionTap, modeActive, startCutIslands: startIslands };
 })();

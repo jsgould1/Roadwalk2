@@ -103,11 +103,12 @@
 <script src="modules/aecom-toggle.js" defer></script>
 <script src="modules/scope-assign.js?v=5" defer></script>
 <script src="modules/sections-table.js" defer></script>
-<script src="modules/route-menu.js?v=5" defer></script>
+<script src="modules/route-menu.js?v=6" defer></script>
 <script src="modules/scope-pins.js" defer></script>
 <script src="modules/geo-io.js?v=2" defer></script>
 <script src="modules/scope-data.js" defer></script>
 <script src="modules/file-hub.js?v=2" defer></script>
+<script src="modules/map-tools.js" defer></script>
 <script src="modules/flip-sta.js" defer></script>
 
 <style>
@@ -9121,12 +9122,6 @@ body.mobile-mode #app {
       <button class="app-tab active" data-module="dashboard" role="tab" aria-selected="true"
               title="Routes — every road &amp; parking section in the project">
         <span class="app-tab-icon">📊</span><span class="app-tab-label">Routes</span></button>
-      <button class="app-tab" data-module="log" role="tab" aria-selected="false"
-              title="Daily field log">
-        <span class="app-tab-icon">📅</span><span class="app-tab-label">Log</span></button>
-      <button class="app-tab" data-module="safety" role="tab" aria-selected="false"
-              title="Safety (JSB, PPE, THA)">
-        <span class="app-tab-icon">⚠️</span><span class="app-tab-label">Safety</span></button>
       <button class="app-tab" data-module="map" role="tab" aria-selected="false"
               title="Map &amp; Feature inventory">
         <span class="app-tab-icon">🗺</span><span class="app-tab-label">Map</span></button>
@@ -9139,6 +9134,12 @@ body.mobile-mode #app {
       <button class="app-tab" data-module="tracks" role="tab" aria-selected="false"
               title="Photo tracks — station &times; visit grid for grouping across passes">
         <span class="app-tab-icon">🎞</span><span class="app-tab-label">Tracks</span></button>
+      <button class="app-tab" data-module="log" role="tab" aria-selected="false"
+              title="Daily field log">
+        <span class="app-tab-icon">📅</span><span class="app-tab-label">Log</span></button>
+      <button class="app-tab" data-module="safety" role="tab" aria-selected="false"
+              title="Safety (JSB, PPE, THA)">
+        <span class="app-tab-icon">⚠️</span><span class="app-tab-label">Safety</span></button>
       <button class="app-tab app-tab-gear" id="header-styleguide-btn" type="button"
               title="Style Guide &amp; Labels" aria-label="Style Guide">
         <span class="app-tab-icon">◈</span><span class="app-tab-label">Style</span></button>
@@ -14379,6 +14380,40 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     } catch (_) { return false; }
     return true;
   };
+
+  // Open the map stage directly (the Map tab always lands here). With an active
+  // section it shows that section; otherwise a blank aerial map at the project
+  // extent (or the home location) so you can search + Add Route.
+  window._RW.openMap = function () {
+    if (window.showModule) window.showModule('map');
+    const active = state.sectionId && SECTIONS.find((s) => s.id === state.sectionId);
+    if (active) { showView('field', state.sectionId); return true; }
+    try {
+      ['#view-list', '#view-ko-picker', '#view-kickoff', '#view-settings', '#view-styleguide'].forEach((sel) => $(sel)?.classList.remove('active'));
+      $('#view-field').classList.add('active');
+      state.view = 'field'; state.sectionId = null;
+      if (els.backBtn) els.backBtn.style.visibility = 'visible';
+      if (els.headerKicker) els.headerKicker.textContent = 'MAP';
+      if (els.headerName) els.headerName.textContent = '';
+      const ctr = SECTIONS.length ? SECTIONS[0].center : HOME_CENTER;
+      requestAnimationFrame(function () {
+        if (!state.map) initOrUpdateMap({ id: '__map__', type: 'area', name: '', center: ctr, alignment: null, pins: [] });
+        else { state.map.invalidateSize(); state.map.setView(ctr, state.map.getZoom() || HOME_ZOOM); }
+        if (!state.currentBasemap) setBasemap(state.settings.basemap || 'nearmap');
+      });
+    } catch (e) { console.warn('openMap', e); }
+    return true;
+  };
+
+  // Start drawing a new route of the given type ('linear' | 'area') straight on
+  // the current map — no "what are you inspecting?" page. opts.cutIslands queues
+  // the Cut-Islands tool to open once the polygon is created.
+  let _pendingCutIslands = false;
+  window._RW.startTrace = function (type, opts) {
+    _pendingCutIslands = !!(opts && opts.cutIslands) && type === 'area';
+    if (typeof startAlignmentTrace === 'function') startAlignmentTrace(type);
+  };
+  window._RW._consumePendingCutIslands = function () { const v = _pendingCutIslands; _pendingCutIslands = false; return v; };
 
   // Flip a route's stationing: reverse its alignment so 0+00 moves to the other
   // end, then re-project any pins onto the reversed line. Persists + rerenders.
@@ -23983,6 +24018,13 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     }
     state.draftKickoff = null;
     showView('field', dk.sectionId);
+    // Polygon-with-cut-outs: drop straight into the Cut-Islands tool.
+    if (dk.type === 'area' && window._RW._consumePendingCutIslands && window._RW._consumePendingCutIslands()) {
+      setTimeout(function () {
+        const sec = SECTIONS.find(function (s) { return s.id === dk.sectionId; });
+        if (sec && window.RW2RouteMenu && window.RW2RouteMenu.startCutIslands) window.RW2RouteMenu.startCutIslands(sec);
+      }, 450);
+    }
   }
 
   // --- Settings rendering -----------------------------------------------
