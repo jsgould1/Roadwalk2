@@ -11582,7 +11582,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
 
     // Update project header (existing view-list masthead + nav title)
     $('#project-name').textContent = PROJECT.name;
-    const shortName = bundle.short_name || PROJECT.name.split('·')[0].trim().slice(0, 18);
+    const shortName = bundle.short_name || PROJECT.name.split('·')[0].trim();
     $('#header-name').textContent = shortName;
 
     // ── Remap legacy 3-letter ID prefixes to current 2-letter PIN_STYLE codes ──
@@ -12784,8 +12784,8 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     // Header reconfigures per view
     if (name === 'list') {
       els.backBtn.style.visibility = 'hidden';
-      els.headerKicker.textContent = 'SECTION';
-      const shortName = BUNDLE?.short_name || (PROJECT?.name || '').split('·')[0].trim().slice(0, 20) || 'RoadWalk';
+      els.headerKicker.textContent = 'PROJECT';
+      const shortName = BUNDLE?.short_name || (PROJECT?.name || '').split('·')[0].trim() || 'Roadwalk2';
       els.headerName.textContent = shortName;
       const adjBtn = $('#adjust-cl-btn');
       if (adjBtn) adjBtn.hidden = true;
@@ -14338,7 +14338,8 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   // ── File-hub hooks (modules/file-hub.js) ─────────────────────────────────
   function _setProjectHeader(nm) {
     const pn = document.getElementById('project-name'); if (pn) pn.textContent = nm;
-    const hn = document.getElementById('header-name'); if (hn) hn.textContent = String(nm || 'Untitled').split('·')[0].trim().slice(0, 18);
+    const hn = document.getElementById('header-name'); if (hn) hn.textContent = String(nm || 'Untitled Project').split('·')[0].trim();
+    const hk = document.getElementById('header-kicker'); if (hk) hk.textContent = 'PROJECT';
   }
   window._RW.getProjectName = function () { return (typeof PROJECT !== 'undefined' && PROJECT && PROJECT.name) || 'Untitled Project'; };
   window._RW.setProjectName = function (name) {
@@ -14355,7 +14356,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     PROJECT = { id: 'proj', name: name || 'Untitled Project', client: '', kickoffDate: '' };
     // A from-scratch project gets an empty (but real) bundle so the app treats
     // it as a live project — you can add routes without importing anything.
-    BUNDLE = { id: 'proj', name: PROJECT.name, short_name: String(PROJECT.name).split('·')[0].trim().slice(0, 20), sections: [] };
+    BUNDLE = { id: 'proj', name: PROJECT.name, short_name: String(PROJECT.name).split('·')[0].trim(), sections: [] };
     window.SECTIONS = SECTIONS; window.BUNDLE = BUNDLE; window.PROJECT = PROJECT;
     try { state.sectionId = null; } catch (_) {}
     try { _clearProjectFromDB(); } catch (_) {}
