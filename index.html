@@ -108,7 +108,7 @@
 <script src="modules/geo-io.js?v=2" defer></script>
 <script src="modules/scope-data.js" defer></script>
 <script src="modules/file-hub.js?v=2" defer></script>
-<script src="modules/map-tools.js" defer></script>
+<script src="modules/map-tools.js?v=3" defer></script>
 <script src="modules/flip-sta.js" defer></script>
 
 <style>
@@ -14414,6 +14414,11 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     if (typeof startAlignmentTrace === 'function') startAlignmentTrace(type);
   };
   window._RW._consumePendingCutIslands = function () { const v = _pendingCutIslands; _pendingCutIslands = false; return v; };
+
+  // Expose the Google Maps JS loader + key so the map search can use
+  // google.maps.Geocoder (handles business names / POIs / fuzzy matches).
+  window._RW.ensureGoogleSDK = function (key) { try { return ensureGoogleSDK(key || (state.settings.apiKeys && state.settings.apiKeys.google)); } catch (e) { return Promise.reject(e); } };
+  window._RW.getGoogleKey = function () { return (state.settings.apiKeys && state.settings.apiKeys.google) || ''; };
 
   // Flip a route's stationing: reverse its alignment so 0+00 moves to the other
   // end, then re-project any pins onto the reversed line. Persists + rerenders.

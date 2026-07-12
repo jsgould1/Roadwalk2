@@ -29,7 +29,31 @@
     else if (kind === 'area-cut') RW().startTrace('area', { cutIslands: true });
   }
 
-  // ---- search ------------------------------------------------------------
+  // ---- geocoding: Esri (no key, handles business names/POIs), then OSM ---
+  async function geocodeEsri(q, m) {
+    let bias = '';
+    try { if (m && m.getCenter) { const c = m.getCenter(); bias = '&location=' + c.lng + ',' + c.lat; } } catch (_) {}
+    try {
+      const url = 'https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?f=json&maxLocations=1&outFields=Match_addr' + bias + '&singleLine=' + encodeURIComponent(q);
+      const r = await fetch(url); const j = await r.json();
+      const c = (j.candidates || [])[0];
+      if (c && c.location) return { lat: c.location.y, lng: c.location.x, label: c.address || q };
+    } catch (_) {}
+    return null;
+  }
+  async function geocodeOSM(q) {
+    // retry once dropping a leading org acronym ("USPS Greensburg PA" → "Greensburg PA")
+    const tries = [q]; const m = q.match(/^([A-Za-z]{2,5})\s+(.+)$/); if (m) tries.push(m[2]);
+    for (const t of tries) {
+      try {
+        const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(t));
+        const j = await r.json();
+        if (j && j.length) return { lat: +j[0].lat, lng: +j[0].lon, label: j[0].display_name };
+      } catch (_) {}
+    }
+    return null;
+  }
+
   async function onSearch(e) {
     e.preventDefault();
     const inp = document.getElementById('rw2-search-input');
@@ -39,11 +63,10 @@
     if (ll) { m.setView([+ll[1], +ll[2]], 19); return; }
     inp.disabled = true;
     try {
-      const r = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(q));
-      const j = await r.json();
-      if (j && j.length) { m.setView([+j[0].lat, +j[0].lon], 19); toast(j[0].display_name.split(',').slice(0, 3).join(',')); }
-      else toast('No match found', true);
-    } catch (_) { toast('Search unavailable on this network — paste "lat, lng" instead', true); }
+      const hit = (await geocodeEsri(q, m)) || (await geocodeOSM(q));
+      if (hit) { m.setView([hit.lat, hit.lng], 19); toast(String(hit.label).split(',').slice(0, 3).join(',')); }
+      else toast('No match — try a full address, a place name, or paste "lat, lng"', true);
+    } catch (_) { toast('Search failed — paste "lat, lng" instead', true); }
     inp.disabled = false;
   }
 
