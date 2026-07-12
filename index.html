@@ -12406,6 +12406,33 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     },
   };
 
+  // ── Kickoff: only Route Name + Route ID are required ─────────────────────
+  // Everything else is optional so a route can be created quickly in the field.
+  // Also adds a Route ID field to parking lots (roads already had one) and
+  // relabels "Section name" → "Route Name".
+  (function _relaxKickoffRequired() {
+    ['area', 'linear'].forEach(function (t) {
+      var cfg = FIELD_CONFIG.kickoff[t]; if (!cfg || !cfg.sections) return;
+      cfg.sections.forEach(function (sec) {
+        sec.required = (sec.id === 'basics');
+        if (sec.id === 'basics') { sec.title = 'Route basics'; sec.subtitle = 'Name & Route ID'; }
+        (sec.fields || []).forEach(function (f) {
+          if (f.id === 'name') { f.label = 'Route Name'; f.required = true; }
+          else if (f.id === 'routeId') { f.label = 'Route ID'; f.required = true; f.placeholder = 'e.g. LOT-01'; }
+          else f.required = false;
+        });
+        if (sec.id === 'basics') {
+          var fields = sec.fields || (sec.fields = []);
+          if (!fields.some(function (f) { return f.id === 'routeId'; })) {
+            var ni = fields.findIndex(function (f) { return f.id === 'name'; });
+            fields.splice(ni < 0 ? fields.length : ni + 1, 0,
+              { id: 'routeId', label: 'Route ID', type: 'text', required: true, placeholder: 'e.g. LOT-01' });
+          }
+        }
+      });
+    });
+  })();
+
   // App state
   const state = {
     view: 'list',            // 'list' | 'field' | 'kickoff' | 'ko-picker' | 'settings'
@@ -24029,11 +24056,13 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     const v = validateKickoff();
     if (!v.allRequiredDone) return;
 
+    const _rid = (dk.answers.basics?.routeId || '').trim();
     const existing = SECTIONS.find(s => s.id === dk.sectionId);
     if (existing) {
       existing.kickoff = true;
       existing.name = dk.answers.basics?.name || existing.name;
       existing.status = 'prog';
+      if (_rid) { existing.route_id = _rid; existing.in_scope = true; }
       existing.kickoffAnswers = dk.answers;
     } else {
       // New section — reuse the first mock's center for prototype purposes
@@ -24051,6 +24080,8 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         kickoff: true,
         center: HOME_CENTER.slice(),
         alignment: null,
+        route_id: _rid,
+        in_scope: !!_rid,
         kickoffAnswers: dk.answers,
       });
       dk.sectionId = newId;
