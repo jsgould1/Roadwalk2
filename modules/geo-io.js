@@ -226,5 +226,5 @@
   }
   setInterval(mount, 1200); setTimeout(mount, 700);
 
-  window.RW2GeoIO = { exportGeoJSON, importGeoJSON, toFeature };
+  window.RW2GeoIO = { exportGeoJSON, importGeoJSON, toFeature, show };
 })();

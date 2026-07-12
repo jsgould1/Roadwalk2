@@ -105,8 +105,9 @@
 <script src="modules/sections-table.js" defer></script>
 <script src="modules/route-menu.js?v=5" defer></script>
 <script src="modules/scope-pins.js" defer></script>
-<script src="modules/geo-io.js" defer></script>
+<script src="modules/geo-io.js?v=2" defer></script>
 <script src="modules/scope-data.js" defer></script>
+<script src="modules/file-hub.js" defer></script>
 <script src="modules/flip-sta.js" defer></script>
 
 <style>
@@ -9111,12 +9112,15 @@ body.mobile-mode #app {
          The gear has no data-module — its own #header-settings-btn handler
          opens the Settings view. -->
     <div id="app-tabs" role="tablist" aria-label="Module navigation">
+      <button class="app-tab" data-module="file" role="tab" aria-selected="false"
+              title="File — New, Open, Save, and Import/Export components">
+        <span class="app-tab-icon">🗂</span><span class="app-tab-label">File</span></button>
       <button class="app-tab" data-module="project" role="tab" aria-selected="false"
               title="Project information — details, client, contract, contacts">
         <span class="app-tab-icon">📁</span><span class="app-tab-label">Project</span></button>
       <button class="app-tab active" data-module="dashboard" role="tab" aria-selected="true"
-              title="Project overview &amp; section list">
-        <span class="app-tab-icon">📊</span><span class="app-tab-label">Dash</span></button>
+              title="Routes — every road &amp; parking section in the project">
+        <span class="app-tab-icon">📊</span><span class="app-tab-label">Routes</span></button>
       <button class="app-tab" data-module="log" role="tab" aria-selected="false"
               title="Daily field log">
         <span class="app-tab-icon">📅</span><span class="app-tab-label">Log</span></button>
@@ -9223,6 +9227,12 @@ body.mobile-mode #app {
        The existing .view system (position:absolute inside #mod-map) is unchanged.
        ============================================================ -->
   <main class="app-main">
+
+    <!-- ============================================================
+         MODULE: FILE  (New / Open / Save / Import-Export hub)
+         Contents rendered + wired by modules/file-hub.js.
+         ============================================================ -->
+    <div id="mod-file" class="module-view" style="overflow:auto;background:var(--paper-2,#f4f6f9)"></div>
 
     <!-- ============================================================
          MODULE: MAP  (default active — matches existing behaviour)
@@ -14319,6 +14329,35 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   // Expose the live Leaflet map so overlay modules (e.g. the NPS⇄AECOM toggle)
   // can draw on it without reaching into this closure.
   window._RW.getMap = function () { try { return state.map || null; } catch (_) { return null; } };
+
+  // ── File-hub hooks (modules/file-hub.js) ─────────────────────────────────
+  function _setProjectHeader(nm) {
+    const pn = document.getElementById('project-name'); if (pn) pn.textContent = nm;
+    const hn = document.getElementById('header-name'); if (hn) hn.textContent = String(nm || 'Untitled').split('·')[0].trim().slice(0, 18);
+  }
+  window._RW.getProjectName = function () { return (typeof PROJECT !== 'undefined' && PROJECT && PROJECT.name) || 'Untitled Project'; };
+  window._RW.setProjectName = function (name) {
+    if (!name) return false;
+    PROJECT = PROJECT || {}; PROJECT.name = name; window.PROJECT = PROJECT;
+    _setProjectHeader(name);
+    if (typeof _persistSections === 'function') { try { _persistSections(); } catch (_) {} }
+    return true;
+  };
+  // FILE → NEW: empty working set to a fresh named project (saved library parks
+  // are untouched — a New Project is just a blank canvas to draw/import into).
+  window._RW.newProject = function (name) {
+    if (typeof SECTIONS !== 'undefined' && Array.isArray(SECTIONS)) SECTIONS.length = 0;
+    BUNDLE = null;
+    PROJECT = { id: 'proj', name: name || 'Untitled Project', client: '', kickoffDate: '' };
+    window.SECTIONS = SECTIONS; window.BUNDLE = BUNDLE; window.PROJECT = PROJECT;
+    try { state.sectionId = null; } catch (_) {}
+    try { _clearProjectFromDB(); } catch (_) {}
+    if (typeof _persistSections === 'function') { try { _persistSections(); } catch (_) {} }
+    _setProjectHeader(PROJECT.name);
+    if (typeof renderSectionList === 'function') { try { renderSectionList('all'); } catch (_) {} }
+    if (typeof window.renderDashboard === 'function') { try { window.renderDashboard('all'); } catch (_) {} }
+    return true;
+  };
 
   // Flip a route's stationing: reverse its alignment so 0+00 moves to the other
   // end, then re-project any pins onto the reversed line. Persists + rerenders.
@@ -28907,7 +28946,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
 
   function showModule(name) {
     // Guard: ignore unknown module names
-    const VALID = ['map', 'dashboard', 'data', 'safety', 'log', 'settings', 'project', 'triage', 'tracks'];
+    const VALID = ['file', 'map', 'dashboard', 'data', 'safety', 'log', 'settings', 'project', 'triage', 'tracks'];
     if (!VALID.includes(name)) {
       console.warn('[RoadWalk] showModule: unknown module "' + name + '"');
       return;
