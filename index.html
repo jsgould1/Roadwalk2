@@ -14517,10 +14517,25 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     if (idx < 0) return false;
     const wasActive = state.sectionId === id;
     SECTIONS.splice(idx, 1);
+    if (wasActive) state.sectionId = null;
+    // Clear the deleted route's live map layers so it can't linger on the map.
+    try {
+      const ml = state.mapLayers || {};
+      ['alignment', 'alignmentHit', 'routeLabel', 'features', 'subOutlines'].forEach((k) => { if (ml[k]) { try { ml[k].remove(); } catch (_) {} ml[k] = null; } });
+      (ml.subAlignments || []).forEach((l) => { try { l.remove(); } catch (_) {} }); ml.subAlignments = [];
+      ml._lastSecId = null;
+    } catch (_) {}
     if (window._RW.persistSections) window._RW.persistSections();
-    if (wasActive && typeof showView === 'function') {
-      if (SECTIONS[0]) showView('field', SECTIONS[0].id);
-    } else if (window._RW.rerender) window._RW.rerender();
+    // Refresh the list views (Routes list / map list) so it's gone there too.
+    if (typeof renderSectionList === 'function') { try { renderSectionList('all'); } catch (_) {} }
+    if (typeof window.renderDashboard === 'function') { try { window.renderDashboard('all'); } catch (_) {} }
+    // Refresh the map: show the next route, or a blank home map if none remain.
+    if (SECTIONS.length) {
+      if (typeof showView === 'function') showView('field', SECTIONS[0].id);
+      else if (window._RW.rerender) window._RW.rerender();
+    } else if (window._RW.openMap) {
+      window._RW.openMap();
+    }
     return true;
   };
 
