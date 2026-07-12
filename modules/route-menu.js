@@ -35,6 +35,7 @@
        <div class="fp-actions" id="rrp-actions">
          <button class="fp-btn" data-act="data"><span class="fp-ico">✎</span><span class="fp-lbl">Edit Data</span></button>
          <button class="fp-btn" data-act="shape"><span class="fp-ico">⬡</span><span class="fp-lbl">Edit Shape</span></button>
+         <button class="fp-btn" data-act="copy"><span class="fp-ico">⧉</span><span class="fp-lbl">AECOM Copy</span></button>
          <button class="fp-btn" data-act="assign"><span class="fp-ico">🎯</span><span class="fp-lbl">Assign ID</span></button>
          <button class="fp-btn" data-act="flip" id="rrp-flip"><span class="fp-ico">⇄</span><span class="fp-lbl">Flip STA</span></button>
          <button class="fp-btn" data-act="move"><span class="fp-ico">⊹</span><span class="fp-lbl">Move</span></button>
@@ -122,6 +123,12 @@
     if (!sec) return;
     if (act === 'data')   { close(); if (RW().editSectionData) RW().editSectionData(sec.id); return; }
     if (act === 'shape')  { close(); if (RW().startSectionShapeEdit) RW().startSectionShapeEdit(sec.id); return; }
+    if (act === 'copy')   {
+      close();
+      const r = RW().cleanupSection ? RW().cleanupSection(sec.id) : null;
+      toast(r ? `AECOM copy · ${r.before}→${r.after} vertices` : 'Cleanup unavailable', !r);
+      return;
+    }
     if (act === 'flip')   { close(); if (RW().flipActiveStationing) { RW().flipActiveStationing(); toast('Stationing flipped'); } return; }
     if (act === 'assign') { showAssign(sec); return; }
     if (act === 'move')   { startMove(sec); return; }

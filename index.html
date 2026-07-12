@@ -103,7 +103,7 @@
 <script src="modules/aecom-toggle.js" defer></script>
 <script src="modules/scope-assign.js?v=5" defer></script>
 <script src="modules/sections-table.js" defer></script>
-<script src="modules/route-menu.js?v=3" defer></script>
+<script src="modules/route-menu.js?v=4" defer></script>
 <script src="modules/scope-pins.js" defer></script>
 <script src="modules/geo-io.js" defer></script>
 <script src="modules/flip-sta.js" defer></script>
@@ -13019,6 +13019,11 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       state.mapLayers.alignmentHit.remove();
       state.mapLayers.alignmentHit = null;
     }
+    // Clear the active section's centroid Route-ID label (rebuilt below).
+    if (state.mapLayers.routeLabel) {
+      state.mapLayers.routeLabel.remove();
+      state.mapLayers.routeLabel = null;
+    }
     // Clear sub-alignments (ramps / spurs)
     (state.mapLayers.subAlignments || []).forEach(l => { try { l.remove(); } catch (_) {} });
     state.mapLayers.subAlignments = [];
@@ -13184,6 +13189,12 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       });
       }  // end if (!isAreaSection)
 
+      // Active section's Route-ID label at its centroid (selected color).
+      try {
+        const lbl = _routeIdLabel(sec, true);
+        if (lbl) { lbl.addTo(state.map); state.mapLayers.routeLabel = lbl; }
+      } catch (_) {}
+
       // --- Render real pre-walk pins (from prewalk-bundle.json) -----------
       // Line / polygon pins enter vertex-edit mode on click; point pins
       // open the existing inspection sheet. Every layer also gets a
@@ -13298,6 +13309,28 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   // subsection (field-added area section) other than the one in view, so
   // the user can see them beside the main A-D sections and tap to jump.
   // Outline only — the subsection's own pins/assets are not drawn here.
+  // Route-ID label at a section's centroid. `selected` (the active section)
+  // renders in the selected color (navy pill), otherwise the unselected color
+  // (orange). Empty route_id shows NULL. Non-interactive so it never eats taps.
+  function _routeIdLabel(sec, selected) {
+    const al = sec && sec.alignment;
+    if (!Array.isArray(al) || !al.length) return null;
+    const rid = (sec.route_id != null && String(sec.route_id).trim()) || 'NULL';
+    const cLat = al.reduce((a, p) => a + p[0], 0) / al.length;
+    const cLng = al.reduce((a, p) => a + p[1], 0) / al.length;
+    const css = selected
+      ? 'background:#0B3D66;color:#fff;border:1px solid #0B3D66'
+      : 'background:rgba(255,255,255,.82);color:#C85A2B;border:1px solid #C85A2B';
+    return L.marker([cLat, cLng], {
+      interactive: false, keyboard: false, pane: 'overlayPane',
+      icon: L.divIcon({
+        className: 'rw-routeid-label',
+        html: `<div style="${css};font:700 11px 'IBM Plex Mono',monospace;padding:1px 6px;border-radius:6px;white-space:nowrap;transform:translate(-50%,-50%);box-shadow:0 1px 4px rgba(0,0,0,.25)">${rid}</div>`,
+        iconSize: null, iconAnchor: [0, 0],
+      }),
+    });
+  }
+
   function _renderSubsectionOutlines(currentSec) {
     if (state.mapLayers.subOutlines) {
       try { state.mapLayers.subOutlines.remove(); } catch (_) {}
@@ -13349,16 +13382,8 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       } catch (_) {}
       grp.addLayer(layer);
       if (showChips) {
-        const cLat = align.reduce((a, p) => a + p[0], 0) / align.length;
-        const cLng = align.reduce((a, p) => a + p[1], 0) / align.length;
-        grp.addLayer(L.marker([cLat, cLng], {
-          interactive: false,
-          icon: L.divIcon({
-            className: 'rw-sub-outline-label',
-            html: '<div class="sub-outline-chip">' + esc(sub.name || 'Section') + '</div>',
-            iconSize: null, iconAnchor: [0, 0],
-          }),
-        }));
+        const lbl = _routeIdLabel(sub, false);   // Route-ID label, unselected color
+        if (lbl) grp.addLayer(lbl);
       }
       n++;
     });
@@ -14448,6 +14473,38 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   window._RW.traceRing = function (onDone) {
     setDrawTool('polygon', null);   // runs cancelDraw() first, then arms the draw
     _ringCallback = onDone || null;
+  };
+
+  // COPY → AECOM: clean up a section's vertices in place (this IS the AECOM
+  // copy — the NPS original stays frozen in the library bundle). Uses RDP so
+  // straight runs collapse to few points while curves keep detail in
+  // proportion to their tightness. Works for roads and lots (outer + holes).
+  window._RW.cleanupSection = function (id, tolFt) {
+    const sec = _rw2Sec(id);
+    if (!sec || !Array.isArray(sec.alignment) || sec.alignment.length < 3) return null;
+    const tol = (tolFt && tolFt > 0) ? tolFt : 2;   // ft
+    const simplifyRing = (ring, closed) => {
+      if (!Array.isArray(ring) || ring.length < 3) return ring;
+      if (closed) {
+        let s = _rdp(ring.concat([ring[0]]), tol);
+        if (s.length > 1 && s[0][0] === s[s.length - 1][0] && s[0][1] === s[s.length - 1][1]) s = s.slice(0, -1);
+        return s.length >= 3 ? s : ring;
+      }
+      const s = _rdp(ring, tol);
+      return s.length >= 2 ? s : ring;
+    };
+    const countV = (x) => x.alignment.length + (x.holes || []).reduce((a, h) => a + h.length, 0);
+    const before = countV(sec);
+    if (sec.type === 'area') {
+      window._RW.applyAreaGeometry(id, simplifyRing(sec.alignment, true), (sec.holes || []).map((h) => simplifyRing(h, true)));
+    } else {
+      sec.alignment = simplifyRing(sec.alignment, false);
+      sec.aecom_edited = true;
+      if (window._RW.persistSections) window._RW.persistSections();
+      if (window._RW.rerender) window._RW.rerender();
+    }
+    const after = countV(sec);
+    return { type: sec.type, before, after, removed: before - after };
   };
 
   // Rebuild a live SECTIONS entry from a pristine library-bundle section
