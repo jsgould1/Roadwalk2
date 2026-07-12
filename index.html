@@ -14352,8 +14352,10 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   // are untouched — a New Project is just a blank canvas to draw/import into).
   window._RW.newProject = function (name) {
     if (typeof SECTIONS !== 'undefined' && Array.isArray(SECTIONS)) SECTIONS.length = 0;
-    BUNDLE = null;
     PROJECT = { id: 'proj', name: name || 'Untitled Project', client: '', kickoffDate: '' };
+    // A from-scratch project gets an empty (but real) bundle so the app treats
+    // it as a live project — you can add routes without importing anything.
+    BUNDLE = { id: 'proj', name: PROJECT.name, short_name: String(PROJECT.name).split('·')[0].trim().slice(0, 20), sections: [] };
     window.SECTIONS = SECTIONS; window.BUNDLE = BUNDLE; window.PROJECT = PROJECT;
     try { state.sectionId = null; } catch (_) {}
     try { _clearProjectFromDB(); } catch (_) {}
@@ -30241,8 +30243,8 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     // Switches to the Map module then opens the section-type picker
     // (ko-picker view), which is the existing "what kind of section?" step.
     document.getElementById('dash-new-section-btn')?.addEventListener('click', function () {
-      if (!window.BUNDLE) {
-        alert('Import a project before adding a section.');
+      if (!window.BUNDLE && !window.PROJECT) {
+        alert('Start a project first — File → New, or import one.');
         return;
       }
       showModule('map');
