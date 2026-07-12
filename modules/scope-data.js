@@ -127,14 +127,16 @@
     renderPanel();
   }
 
-  const recordFor = (sec) => {
-    const u = activeUnit(); const base = (u && _cache[u] && _cache[u][canon(sec.route_id)]) || {};
-    return Object.assign({}, base, sec.scope_data || {});
-  };
+  // workbook (original) values only
+  const workbookFor = (sec) => { const u = activeUnit(); return (u && _cache[u] && _cache[u][canon(sec.route_id)]) || {}; };
+  // effective = field update over workbook original
+  const recordFor = (sec) => Object.assign({}, workbookFor(sec), sec.scope_data || {});
+  const persist = () => { if (window._RW && window._RW.persistSections) window._RW.persistSections(); };
 
   // ---- Route Data sheet -------------------------------------------------
   const GROUPS = [
     { t: 'Identity', f: ['Section Name', 'Route Name', 'Shape File Description', 'Road/Parking'] },
+    { t: 'Measurements', f: ['Rd Width', 'RIP Data'] },
     { t: 'Pavement Markings', f: ['4" Line', '6" Line', '12" Line', '24" Line', 'Traffic Arrow', 'Small Traffic Arrow', 'Handicap Parking Striping', 'Cross walks Striping', 'Bike  Striping', 'One way Striping', 'Speed Limit Striping'] },
     { t: 'Signs', f: ['Speed Limit Sign', 'Stop Sign', 'Yield Sign', 'Do Not Enter Sign', 'One Way Sign', 'Lane Control Sign', 'Trail X-ing Sign', 'Ahead Sign', 'Handicap Sign', 'Sign Posts', 'Misc Sign'] },
     { t: 'Traffic Calming & Curbing', f: ['Speed Bumps', 'Curb Stoppers', 'Curb Type', 'Gutter Type'] },
@@ -197,43 +199,128 @@
          <div style="font-size:14px;font-weight:700;color:#12233b;margin-top:2px">${esc(v)}</div></div>`).join('')}
     </div>`;
 
+    const wb = workbookFor(sec);
+    const upd = sec.scope_data || {}, conf = sec.scope_confirmed || {}, custom = sec.scope_custom || [];
+
+    // A field row: [✓ confirm-as-is toggle] label / was:orig  [updated value]
+    const fieldRow = (f) => {
+      const orig = wb[f], update = upd[f], confirmed = !!conf[f];
+      const hasOrig = orig != null && orig !== '', hasUpd = update != null && update !== '';
+      const label = f.replace(' Striping', '').replace(' Sign', '');
+      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-top:1px solid #eef1f4;${confirmed ? 'background:#f0faf6' : ''}">
+        <button data-confirm="${esc(f)}" title="Confirm value as-is" style="flex:none;width:38px;height:34px;border:1.5px solid ${confirmed ? '#0e7c66' : '#c3ccd4'};border-radius:9px;background:${confirmed ? '#0e7c66' : '#fff'};color:${confirmed ? '#fff' : '#c3ccd4'};font-size:17px;font-weight:800;cursor:pointer;line-height:1">✓</button>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13.5px;color:#12233b;font-weight:500;line-height:1.2">${esc(label)}</div>
+          <div style="font-size:11px;color:#8a949f">was: ${hasOrig ? esc(orig) : '—'}</div>
+        </div>
+        <input data-update="${esc(f)}" value="${hasUpd ? esc(update) : ''}" placeholder="${hasOrig ? esc(orig) : 'new'}" inputmode="text"
+          style="flex:none;width:94px;height:36px;text-align:right;border:1px solid ${hasUpd ? '#e8a838' : '#c9d6e5'};border-radius:9px;padding:2px 9px;font-size:14px;color:#12233b;background:${hasUpd ? '#fff9ee' : '#fff'}"></div>`;
+    };
+
     for (const g of GROUPS) {
-      const rows = g.f.map((f) => {
-        const val = rec[f];
-        const isIdentity = g.t === 'Identity';
-        const filled = val != null && val !== '';
-        // Identity fields are read-only text; everything else is an editable input.
-        if (isIdentity) {
-          if (!filled) return '';
-          return `<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px solid #eef1f4">
+      let rows;
+      if (g.t === 'Identity') {
+        rows = g.f.map((f) => {
+          const val = rec[f]; if (val == null || val === '') return '';
+          return `<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 2px;border-top:1px solid #eef1f4">
              <span style="font-size:12px;color:#5b6673">${esc(f.replace(' Striping', ''))}</span>
              <span style="font-size:12.5px;color:#12233b;font-weight:600;text-align:right">${esc(val)}</span></div>`;
-        }
-        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0;border-top:1px solid #eef1f4">
-           <span style="font-size:12px;color:#5b6673">${esc(f.replace(' Striping', '').replace(' Sign', ''))}</span>
-           <input data-f="${esc(f)}" value="${esc(filled ? val : '')}" placeholder="—"
-             style="width:96px;text-align:right;border:1px solid ${filled ? '#c9d6e5' : '#e3e8ee'};border-radius:6px;padding:3px 7px;font-size:12.5px;color:#12233b;background:${filled ? '#fbfdff' : '#fff'}"></div>`;
-      }).join('');
+        }).join('');
+      } else {
+        rows = g.f.map(fieldRow).join('');   // every field verifiable in the field
+      }
       if (!rows) continue;
       html += `<div style="background:#fff;border:1px solid #e3e8ee;border-radius:11px;padding:9px 12px;margin-bottom:10px">
          <div style="font-size:12px;font-weight:700;color:#0B3D66;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">${g.t}</div>
          ${rows}</div>`;
     }
-    if (!Object.keys(rec).length) html += `<div style="color:#8a949f;font-size:12.5px;padding:8px 2px">No workbook data for ${esc(rid)} yet — import the Field Survey Data XLSX via the <b>SCOPE DATA</b> button, or type values below to start.</div>`;
+
+    // Additional (custom) fields → export as new XLSX columns
+    const customRows = custom.map((c, i) => `<div style="display:flex;gap:6px;margin-bottom:5px">
+        <input data-cname="${i}" value="${esc(c.name || '')}" placeholder="Field name" style="flex:1;min-width:0;height:34px;border:1px solid #c9d6e5;border-radius:8px;padding:2px 9px;font-size:13px">
+        <input data-cval="${i}" value="${esc(c.value || '')}" placeholder="Value" style="width:94px;height:34px;border:1px solid #c9d6e5;border-radius:8px;padding:2px 9px;font-size:13px">
+        <button data-crm="${i}" title="Remove" style="flex:none;width:34px;height:34px;border:1px solid #e7c4bf;background:#fdf0ee;color:#c0392b;border-radius:8px;cursor:pointer">✕</button></div>`).join('');
+    html += `<div style="background:#fff;border:1px solid #e3e8ee;border-radius:11px;padding:9px 12px;margin-bottom:14px">
+       <div style="font-size:12px;font-weight:700;color:#0B3D66;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Additional Fields</div>
+       <div>${customRows}</div>
+       <button id="rd-custom-add" style="margin-top:4px;width:100%;height:36px;border:1px dashed #b7cdec;background:#f6f8fa;border-radius:9px;cursor:pointer;color:#12233b;font-weight:600;font-size:13.5px">+ Add field</button>
+       <div style="font-size:10.5px;color:#8a949f;margin-top:6px">New fields export as extra columns in the XLSX (SCOPE DATA → Export).</div></div>`;
 
     const body = ov.querySelector('#rw2-rdata-body');
     body.innerHTML = html;
-    body.querySelectorAll('input[data-f]').forEach((inp) => {
-      inp.onchange = () => {
-        const f = inp.getAttribute('data-f'); const v = inp.value.trim();
-        sec.scope_data = sec.scope_data || {};
-        if (v === '') delete sec.scope_data[f]; else sec.scope_data[f] = /^-?\d+(\.\d+)?$/.test(v) ? +v : v;
-        if (window._RW.persistSections) window._RW.persistSections();
-        inp.style.background = v === '' ? '#fff' : '#fbfdff';
-        inp.style.borderColor = v === '' ? '#e3e8ee' : '#c9d6e5';
-      };
+    // confirm toggles
+    body.querySelectorAll('[data-confirm]').forEach((b) => b.onclick = () => {
+      const f = b.getAttribute('data-confirm'); sec.scope_confirmed = sec.scope_confirmed || {};
+      if (sec.scope_confirmed[f]) delete sec.scope_confirmed[f]; else sec.scope_confirmed[f] = true;
+      persist(); openRouteData(sec);
     });
+    // updated-value inputs (no re-render → keeps typing/focus)
+    body.querySelectorAll('[data-update]').forEach((inp) => inp.onchange = () => {
+      const f = inp.getAttribute('data-update'), v = inp.value.trim();
+      sec.scope_data = sec.scope_data || {};
+      if (v === '') delete sec.scope_data[f]; else sec.scope_data[f] = /^-?\d+(\.\d+)?$/.test(v) ? +v : v;
+      persist();
+      inp.style.background = v === '' ? '#fff' : '#fff9ee'; inp.style.borderColor = v === '' ? '#c9d6e5' : '#e8a838';
+    });
+    // custom fields
+    const ca = body.querySelector('#rd-custom-add');
+    if (ca) ca.onclick = () => { sec.scope_custom = sec.scope_custom || []; sec.scope_custom.push({ name: '', value: '' }); persist(); openRouteData(sec); };
+    body.querySelectorAll('[data-cname]').forEach((inp) => inp.onchange = () => { const i = +inp.getAttribute('data-cname'); if (sec.scope_custom[i]) { sec.scope_custom[i].name = inp.value.trim(); persist(); } });
+    body.querySelectorAll('[data-cval]').forEach((inp) => inp.onchange = () => { const i = +inp.getAttribute('data-cval'); if (sec.scope_custom[i]) { sec.scope_custom[i].value = /^-?\d+(\.\d+)?$/.test(inp.value.trim()) ? +inp.value.trim() : inp.value.trim(); persist(); } });
+    body.querySelectorAll('[data-crm]').forEach((b) => b.onclick = () => { const i = +b.getAttribute('data-crm'); sec.scope_custom.splice(i, 1); persist(); openRouteData(sec); });
     ov.style.display = 'flex';
+  }
+
+  // ---- XLSX export (minimal writer via JSZip, inline strings) -----------
+  const xesc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const colRef = (i) => { let s = ''; i++; while (i > 0) { s = String.fromCharCode(65 + (i - 1) % 26) + s; i = Math.floor((i - 1) / 26); } return s; };
+  function buildXlsx(headers, rows) {
+    const cell = (v, r, ci) => {
+      const ref = colRef(ci) + r;
+      if (v == null || v === '') return `<c r="${ref}"/>`;
+      if (typeof v === 'number' && isFinite(v)) return `<c r="${ref}"><v>${v}</v></c>`;
+      return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xesc(v)}</t></is></c>`;
+    };
+    const all = [headers].concat(rows);
+    const sheetData = all.map((row, ri) => `<row r="${ri + 1}">${row.map((v, ci) => cell(v, ri + 1, ci)).join('')}</row>`).join('');
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`);
+    zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`);
+    zip.file('xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Route Data" sheetId="1" r:id="rId1"/></sheets></workbook>`);
+    zip.file('xl/_rels/workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`);
+    zip.file('xl/worksheets/sheet1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetData}</sheetData></worksheet>`);
+    return zip.generateAsync({ type: 'blob' });
+  }
+
+  const PREFERRED = [...new Set(
+    ['Section Name', 'Route Name', 'Shape File Description', 'Road/Parking', 'Length (mi)', 'Area (SF)']
+      .concat(GROUPS.filter((g) => g.t !== 'Identity').flatMap((g) => g.f))
+      .concat(['Start Lat', 'Start Long', 'End Lat', 'End Long', 'Lat', 'Long']))];
+
+  async function exportXlsx() {
+    const unit = activeUnit(); const S = sections();
+    if (!S.length) { toast('Open a park to export', true); return; }
+    // standard columns = preferred order (present anywhere) + any other seen keys
+    const seen = new Set();
+    S.forEach((s) => { Object.keys(workbookFor(s)).forEach((k) => seen.add(k)); Object.keys(s.scope_data || {}).forEach((k) => seen.add(k)); });
+    const stdCols = PREFERRED.filter((k) => seen.has(k)).concat([...seen].filter((k) => !PREFERRED.includes(k)));
+    const custCols = [...new Set(S.flatMap((s) => (s.scope_custom || []).map((c) => (c.name || '').trim()).filter(Boolean)))];
+    const headers = ['Park', 'Route ID'].concat(stdCols, custCols, ['Confirmed Fields', 'Updated Fields']);
+    const rows = S.map((s) => {
+      const wb = workbookFor(s), upd = s.scope_data || {}, conf = s.scope_confirmed || {}, cust = s.scope_custom || [];
+      const eff = (f) => (upd[f] != null ? upd[f] : (f === 'Area (SF)' && s.area_sqft ? s.area_sqft : wb[f]));
+      return [unit || '', s.route_id || '']
+        .concat(stdCols.map(eff))
+        .concat(custCols.map((cn) => { const c = cust.find((x) => (x.name || '').trim() === cn); return c ? c.value : ''; }))
+        .concat([Object.keys(conf).join(', '), Object.keys(upd).join(', ')]);
+    });
+    const blob = await buildXlsx(headers, rows);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${unit || 'park'}_route_data.xlsx`;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    toast(`Exported ${S.length} routes${custCols.length ? ' · ' + custCols.length + ' custom col' + (custCols.length === 1 ? '' : 's') : ''}`);
   }
 
   // ---- import panel -----------------------------------------------------
@@ -247,12 +334,16 @@
       `<div style="background:#fff;border-radius:12px;max-width:480px;width:94%;box-shadow:0 12px 44px rgba(0,0,0,.3)">
          <div style="background:#12233b;color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center"><b>Scope data (XLSX)</b><span id="rw2-sdata-x" style="cursor:pointer;font-size:20px">×</span></div>
          <div id="rw2-sdata-body" style="padding:14px"></div>
-         <div style="padding:10px 14px;border-top:1px solid #e3e8ee"><button id="rw2-sdata-load" style="width:100%;padding:10px;border:1px dashed #b7cdec;background:#f6f8fa;border-radius:9px;cursor:pointer;color:#12233b;font-weight:600">+ Load Field Survey Data (.xlsx)</button></div>
+         <div style="padding:10px 14px;border-top:1px solid #e3e8ee;display:flex;gap:8px">
+           <button id="rw2-sdata-load" style="flex:1;padding:10px;border:1px dashed #b7cdec;background:#f6f8fa;border-radius:9px;cursor:pointer;color:#12233b;font-weight:600">⭱ Import .xlsx</button>
+           <button id="rw2-sdata-export" style="flex:1;padding:10px;border:0;background:#1a73e8;color:#fff;border-radius:9px;cursor:pointer;font-weight:600">⭳ Export .xlsx</button>
+         </div>
        </div>`;
     document.body.appendChild(ov);
     ov.addEventListener('click', (e) => { if (e.target === ov) ov.style.display = 'none'; });
     ov.querySelector('#rw2-sdata-x').onclick = () => { ov.style.display = 'none'; };
     ov.querySelector('#rw2-sdata-load').onclick = () => fileInput.click();
+    ov.querySelector('#rw2-sdata-export').onclick = () => { exportXlsx(); };
     return ov;
   }
   function renderPanel() {
@@ -292,5 +383,5 @@
   setInterval(mount, 1200); setTimeout(mount, 750);
   loadCache();
 
-  window.RW2RouteData = { open: openRouteData, importXlsx, showPanel, recordFor };
+  window.RW2RouteData = { open: openRouteData, importXlsx, exportXlsx, showPanel, recordFor };
 })();
