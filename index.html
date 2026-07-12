@@ -105,6 +105,7 @@
 <script src="modules/sections-table.js" defer></script>
 <script src="modules/route-menu.js?v=3" defer></script>
 <script src="modules/scope-pins.js" defer></script>
+<script src="modules/geo-io.js" defer></script>
 <script src="modules/flip-sta.js" defer></script>
 
 <style>
@@ -14434,6 +14435,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     sec.area_sqft = Math.max(0, Math.round(a));
     sec.center = sec.alignment[Math.floor(sec.alignment.length / 2)] || sec.center;
     sec.meta = `${sec.projectCode || ''}${sec.area_sqft ? ` · ${(sec.area_sqft / 43560).toFixed(2)} ac` : ''}`;
+    sec.aecom_edited = true;   // boundary/holes were edited → this is the AECOM copy
     if (window._RW.persistSections) window._RW.persistSections();
     if (window._RW.rerender) window._RW.rerender();
     return sec.area_sqft;
