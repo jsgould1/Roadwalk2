@@ -33,7 +33,8 @@
          <button id="rrp-close" type="button" title="Close">✕</button>
        </div>
        <div class="fp-actions" id="rrp-actions">
-         <button class="fp-btn" data-act="data"><span class="fp-ico">✎</span><span class="fp-lbl">Edit Data</span></button>
+         <button class="fp-btn" data-act="rdata"><span class="fp-ico">📋</span><span class="fp-lbl">Route Data</span></button>
+         <button class="fp-btn" data-act="data"><span class="fp-ico">✎</span><span class="fp-lbl">Edit Setup</span></button>
          <button class="fp-btn" data-act="shape"><span class="fp-ico">⬡</span><span class="fp-lbl">Edit Shape</span></button>
          <button class="fp-btn" data-act="copy"><span class="fp-ico">⧉</span><span class="fp-lbl">AECOM Copy</span></button>
          <button class="fp-btn" data-act="assign"><span class="fp-ico">🎯</span><span class="fp-lbl">Assign ID</span></button>
@@ -121,6 +122,7 @@
   function onAction(act) {
     const sec = _sec;
     if (!sec) return;
+    if (act === 'rdata')  { close(); if (window.RW2RouteData) window.RW2RouteData.open(sec); return; }
     if (act === 'data')   { close(); if (RW().editSectionData) RW().editSectionData(sec.id); return; }
     if (act === 'shape')  { close(); if (RW().startSectionShapeEdit) RW().startSectionShapeEdit(sec.id); return; }
     if (act === 'copy')   {
