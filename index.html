@@ -107,7 +107,8 @@
 <script src="modules/scope-pins.js" defer></script>
 <script src="modules/geo-io.js?v=2" defer></script>
 <script src="modules/scope-data.js?v=2" defer></script>
-<script src="modules/file-hub.js?v=2" defer></script>
+<script src="modules/file-hub.js?v=3" defer></script>
+<script src="modules/snapshots.js" defer></script>
 <script src="modules/map-tools.js?v=3" defer></script>
 <script src="modules/flip-sta.js" defer></script>
 
@@ -14359,10 +14360,12 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     PROJECT = { id: 'proj', name: name || 'Untitled Project', client: '', kickoffDate: '' };
     // A from-scratch project gets an empty (but real) bundle so the app treats
     // it as a live project — you can add routes without importing anything.
-    BUNDLE = { id: 'proj', name: PROJECT.name, short_name: String(PROJECT.name).split('·')[0].trim(), sections: [] };
+    // _scratch marks it so _persistSections keeps the active-project bundle in
+    // sync (imported parks keep their pristine bundle instead).
+    BUNDLE = { id: 'proj', name: PROJECT.name, short_name: String(PROJECT.name).split('·')[0].trim(), sections: [], _scratch: true };
     window.SECTIONS = SECTIONS; window.BUNDLE = BUNDLE; window.PROJECT = PROJECT;
     try { state.sectionId = null; } catch (_) {}
-    try { _clearProjectFromDB(); } catch (_) {}
+    try { _saveProjectToDB(BUNDLE); } catch (_) {}   // persist so a reload restores it
     if (typeof _persistSections === 'function') { try { _persistSections(); } catch (_) {} }
     _setProjectHeader(PROJECT.name);
     if (typeof renderSectionList === 'function') { try { renderSectionList('all'); } catch (_) {} }
@@ -14446,6 +14449,10 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       sections: secs,
     });
   };
+  // Bridge: _saveProjectToDB lives in this IIFE (which closes before the block
+  // that defines _persistSections), so expose it for the auto-save sync there.
+  window._RW.saveActiveProject = function (b) { try { return _saveProjectToDB(b || (BUNDLE || {})); } catch (e) { return Promise.reject(e); } };
+  window._RW.isScratchProject = function () { return !!(BUNDLE && BUNDLE._scratch); };
 
   // Flip a route's stationing: reverse its alignment so 0+00 moves to the other
   // end, then re-project any pins onto the reversed line. Persists + rerenders.
@@ -28662,6 +28669,15 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
              'rw_sections_' + _pid)
         .then(function () { _updateSaveWidget(); })
         .catch(function (e) { console.warn('[RoadWalk] section persist failed:', e); });
+      // From-scratch projects: keep the active-project bundle in sync so a
+      // reload restores the drawn routes (imported parks keep their pristine
+      // bundle + working-copy overlay, so we don't overwrite it). _saveProjectToDB
+      // lives in another IIFE, so we reach it through the window._RW bridge.
+      if (window._RW && window._RW.isScratchProject && window._RW.isScratchProject()
+          && typeof window._RW.bundleFromSections === 'function'
+          && typeof window._RW.saveActiveProject === 'function') {
+        try { window._RW.saveActiveProject(window._RW.bundleFromSections()); } catch (_) {}
+      }
     } catch (e) { console.warn('[RoadWalk] _persistSections error:', e); }
   }
   window._RW = window._RW || {};

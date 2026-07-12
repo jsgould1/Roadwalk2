@@ -52,6 +52,7 @@
     geojson() { if (window.RW2GeoIO) window.RW2GeoIO.show(); else toast('GeoJSON module not ready', true); },
     table() { if (window.RW2SectionsTable) window.RW2SectionsTable.show(); else toast('Table module not ready', true); },
     photos() { click('dash-photo-export-btn'); },
+    history() { if (window.RW2Snapshots) window.RW2Snapshots.show(); else toast('Snapshots not ready', true); },
     gotoRoutes() { if (window.showModule) window.showModule('dashboard'); },
     gotoMap() { if (window.showModule) window.showModule('map'); },
     rename() {
@@ -110,6 +111,7 @@
         tile('open', '📂', 'Open', 'Open a saved project'),
         tile('save', '💾', 'Save / Export', 'Download this project'),
         tile('saveas', '🏷️', 'Save As', 'Rename, then export'),
+        tile('history', '🕘', 'History', 'Auto-saved snapshots · restore'),
       ].join(''))}
 
          ${group('Build project', [
