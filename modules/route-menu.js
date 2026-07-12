@@ -159,22 +159,39 @@
     const acts = document.getElementById('rrp-actions');
     const unit = S && S.activeUnit ? S.activeUnit() : null;
     const list = (S && S.scopeList && unit) ? S.scopeList(unit) : [];
-    let html = '';
-    if (!list.length) {
-      html = `<div style="font-size:11px;color:var(--ink-3,#888);padding:4px 2px">No in-scope route list for this park (RIP-only).</div>`;
-    } else {
-      html = list.map((r) => `
+    const cur = (sec.route_id != null ? String(sec.route_id) : '').replace(/"/g, '&quot;');
+    // Always offer a custom Route ID (works for from-scratch projects with no scope list).
+    let html = `<div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
+        <input id="rrp-custom-rid" value="${cur}" placeholder="Type a Route ID" autocomplete="off"
+          style="flex:1;min-width:0;height:36px;border:1px solid #c9d6e5;border-radius:8px;padding:2px 10px;font-size:14px;font-family:'IBM Plex Mono',monospace">
+        <button id="rrp-custom-set" style="border:0;background:#0e7c66;color:#fff;border-radius:8px;padding:0 14px;height:36px;cursor:pointer;font-weight:700">Set</button>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#5b6673;margin-bottom:10px">
+        <input type="checkbox" id="rrp-custom-scope" checked style="width:16px;height:16px"> Mark this route in-scope</label>`;
+    if (list.length) {
+      html += `<div style="font-size:11px;color:#8a949f;margin:0 2px 5px">…or pick an in-scope route:</div>`;
+      html += list.map((r) => `
         <button class="fp-btn" data-rid="${r.rid}" style="flex-direction:row;justify-content:flex-start;gap:8px;min-height:34px;${r.assigned ? 'opacity:.5' : ''}">
           <span style="font-family:'IBM Plex Mono',monospace;font-weight:700">${r.rid}</span>
           <span style="font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.route_name || ''}</span>
           ${r.assigned ? '<span style="margin-left:auto;font-size:9px">assigned</span>' : ''}
         </button>`).join('');
     }
-    html += `<div style="display:flex;gap:6px;margin-top:4px">
+    html += `<div style="display:flex;gap:6px;margin-top:6px">
         <button class="fp-btn" id="rrp-assign-clear" style="min-height:32px;flex:1">Clear ID</button>
         <button class="fp-btn" id="rrp-assign-back" style="min-height:32px;flex:1">← Back</button>
       </div>`;
     box.innerHTML = html;
+    const ridInp = box.querySelector('#rrp-custom-rid');
+    const doSet = () => {
+      const v = (ridInp.value || '').trim(); if (!v) { ridInp.focus(); return; }
+      sec.route_id = v; sec.in_scope = box.querySelector('#rrp-custom-scope').checked;
+      if (window._RW && window._RW.persistSections) window._RW.persistSections();
+      if (window._RW && window._RW.rerender) window._RW.rerender();
+      close(); toast('Route ID set: ' + v);
+    };
+    box.querySelector('#rrp-custom-set').onclick = doSet;
+    ridInp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); doSet(); } };
     box.querySelectorAll('[data-rid]').forEach((b) => {
       b.onclick = () => {
         if (window.RW2Scope && window.RW2Scope.assignId) window.RW2Scope.assignId(sec, b.getAttribute('data-rid'));

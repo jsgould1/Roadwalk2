@@ -103,10 +103,10 @@
 <script src="modules/aecom-toggle.js" defer></script>
 <script src="modules/scope-assign.js?v=5" defer></script>
 <script src="modules/sections-table.js" defer></script>
-<script src="modules/route-menu.js?v=6" defer></script>
+<script src="modules/route-menu.js?v=7" defer></script>
 <script src="modules/scope-pins.js" defer></script>
 <script src="modules/geo-io.js?v=2" defer></script>
-<script src="modules/scope-data.js" defer></script>
+<script src="modules/scope-data.js?v=2" defer></script>
 <script src="modules/file-hub.js?v=2" defer></script>
 <script src="modules/map-tools.js?v=3" defer></script>
 <script src="modules/flip-sta.js" defer></script>
@@ -14419,6 +14419,33 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   // google.maps.Geocoder (handles business names / POIs / fuzzy matches).
   window._RW.ensureGoogleSDK = function (key) { try { return ensureGoogleSDK(key || (state.settings.apiKeys && state.settings.apiKeys.google)); } catch (e) { return Promise.reject(e); } };
   window._RW.getGoogleKey = function () { return (state.settings.apiKeys && state.settings.apiKeys.google) || ''; };
+
+  // Inverse of the applyBundle mapping: a live SECTIONS entry → a bundle
+  // section ([lat,lng] → [lng,lat]). Lets the exporter fold drawn/edited routes
+  // into the bundle so they count as "Routes & geometry" (not "Map features").
+  function _bundleSectionFromLive(s) {
+    const toLngLat = (r) => (r || []).map((c) => [c[1], c[0]]);
+    return {
+      id: s.id, name: s.name, type: s.type,
+      alignment: toLngLat(s.alignment),
+      sub_alignments: (s.subAlignments || []).map((sa) => ({ role: sa.role, name: sa.name, length_ft: sa.lengthFt, coordinates: toLngLat(sa.coords) })),
+      pathweb_refs: s.pathwebRefs, project_code: s.projectCode, mp_start: s.mpStart, mp_end: s.mpEnd,
+      area_sqft: s.area_sqft, uid: s.uid, route_id: s.route_id || '', faclocid: s.faclocid || '',
+      rip: s.rip || null, in_scope: !!s.in_scope, scope_name: s.scope_name || '', scope_section: s.scope_section || '', scope_flag: !!s.scope_flag,
+      src_name: s.src_name || s.name, merged_from: s.merged_from || null,
+      holes: (s.holes && s.holes.length) ? s.holes.map(toLngLat) : undefined,
+      pins: s.pins || [],
+    };
+  }
+  window._RW.bundleFromSections = function () {
+    const secs = (typeof SECTIONS !== 'undefined' ? SECTIONS : []).map(_bundleSectionFromLive);
+    return Object.assign({}, BUNDLE || {}, {
+      id: (BUNDLE && BUNDLE.id) || 'proj',
+      name: (PROJECT && PROJECT.name) || (BUNDLE && BUNDLE.name) || '',
+      short_name: (BUNDLE && BUNDLE.short_name) || (PROJECT && PROJECT.name) || '',
+      sections: secs,
+    });
+  };
 
   // Flip a route's stationing: reverse its alignment so 0+00 moves to the other
   // end, then re-project any pins onto the reversed line. Persists + rerenders.
@@ -30591,16 +30618,20 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
 
     // ── Step 1/6: Bundle (synchronous — already in memory) ──────
     onProgress(10);
-    if (result.bundle) {
-      const pinCount = (result.bundle.sections || []).reduce(function (n, s) {
-        return n + (s.pins || []).length;
-      }, 0);
+    // From-scratch projects have an empty bundle but their drawn routes live in
+    // SECTIONS — fold them in so they export + count as Routes & geometry.
+    const _bundleSecs = (result.bundle && result.bundle.sections) || [];
+    if (!_bundleSecs.length && Array.isArray(window.SECTIONS) && window.SECTIONS.length
+        && window._RW && typeof window._RW.bundleFromSections === 'function') {
+      result.bundle = window._RW.bundleFromSections();
+    }
+    if (result.bundle && (result.bundle.sections || []).length) {
+      const pinCount = (result.bundle.sections || []).reduce(function (n, s) { return n + (s.pins || []).length; }, 0);
       const secCount = (result.bundle.sections || []).length;
       _expRowUpdate('bundle', 'ok', '✓',
-        secCount + ' section' + (secCount !== 1 ? 's' : '') +
-        ' · ' + pinCount + ' pins');
+        secCount + ' section' + (secCount !== 1 ? 's' : '') + ' · ' + pinCount + ' pins');
     } else {
-      _expRowUpdate('bundle', 'warn', '⚠', 'No bundle loaded');
+      _expRowUpdate('bundle', 'info', '○', 'No routes yet');
     }
 
     // ── Step 2/6: Inspections (IDB) ─────────────────────────────
@@ -30654,10 +30685,11 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
           });
         });
       }
-      _expRowUpdate('safety', secN ? 'ok' : 'info',
-        secN ? '✓' : '○',
-        secN ? (drawn + ' added · ' + secN + ' section' + (secN !== 1 ? 's' : ''))
-             : 'None yet');
+      // Routes/geometry are counted above; this row is only the features + edits
+      // laid on top of them (drawn pins, GPS tracks, kickoff answers).
+      _expRowUpdate('safety', drawn ? 'ok' : 'info',
+        drawn ? '✓' : '○',
+        drawn ? (drawn + ' feature' + (drawn !== 1 ? 's' : '')) : 'None yet');
     } catch (e) {
       result.safety = null;
       _expRowUpdate('safety', 'warn', '⚠', 'Read error');

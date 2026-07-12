@@ -173,7 +173,7 @@
     ov.querySelector('#rw2-rdata-head').innerHTML =
       `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
          <div style="min-width:0">
-           <div style="font:700 20px 'IBM Plex Mono',monospace;line-height:1.1">${esc(rid)}</div>
+           <div id="rw2-rdata-rid" title="Tap to set the Route ID" style="font:700 20px 'IBM Plex Mono',monospace;line-height:1.1;cursor:pointer">${esc(rid)} <span style="font-size:12px;opacity:.6">✎</span></div>
            <div style="font-size:12px;opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(sec.name || sec.id)} · ${esc(activeUnit() || '')}</div>
          </div>
          <span style="cursor:pointer;font-size:22px;line-height:1" id="rw2-rdata-x">×</span>
@@ -184,6 +184,16 @@
          ${rec['RIP Data'] != null ? `<span style="background:rgba(255,255,255,.2);padding:2px 9px;border-radius:999px;font-size:11px;font-weight:600">RIP ${esc(rec['RIP Data'])}</span>` : ''}
        </div>`;
     ov.querySelector('#rw2-rdata-x').onclick = hideSheet;
+    // Tap the Route ID to set/change it (works for from-scratch routes).
+    const ridEl = ov.querySelector('#rw2-rdata-rid');
+    if (ridEl) ridEl.onclick = () => {
+      const v = prompt('Route ID for this ' + (sec.type === 'area' ? 'lot' : 'road') + ':', sec.route_id || '');
+      if (v === null) return;
+      sec.route_id = v.trim();
+      if (window._RW && window._RW.persistSections) window._RW.persistSections();
+      if (window._RW && window._RW.rerender) window._RW.rerender();
+      openRouteData(sec);
+    };
 
     // measurement tiles (read-only): area from live geometry, rest from workbook
     const areaSf = sec.area_sqft || rec['Area (SF)'];
