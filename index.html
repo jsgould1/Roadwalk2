@@ -100,7 +100,7 @@
 <script src="modules/park-import.js" defer></script>
 <script src="modules/library.js" defer></script>
 <script src="modules/route-tools.js" defer></script>
-<script src="modules/aecom-toggle.js" defer></script>
+<script src="modules/aecom-toggle.js?v=2" defer></script>
 <script src="modules/scope-assign.js?v=5" defer></script>
 <script src="modules/sections-table.js" defer></script>
 <script src="modules/route-menu.js?v=7" defer></script>
@@ -13326,8 +13326,13 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         openStrip(sec, midStaFt);
       }
       state.mapLayers._lastSecId = sec.id;
-    } else {
-      // Area section — fake polygon boundary
+    } else if (sec.center && !String(sec.id || '').startsWith('__')) {
+      // Legacy placeholder: an area section with no traced boundary yet.
+      // NOTE: never drawn for the map-open / trace pseudo-sections (ids like
+      // '__map__', '__trace__') — those have no real shape, and drawing this
+      // fake ~180m box around the view center just looked like a stray blue
+      // rectangle framing the map. Real area sections always have an
+      // alignment and take the branch above, so this is a rare fallback.
       const c = sec.center;
       const offsets = [
         [c[0] + 0.0008, c[1] - 0.0010],

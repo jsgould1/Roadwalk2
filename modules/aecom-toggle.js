@@ -1,14 +1,16 @@
 /* =========================================================================
- * aecom-toggle.js — NPS ⇄ AECOM geometry toggle (3-state).
+ * aecom-toggle.js — CLIENT ⇄ AECOM geometry toggle (3-state).
  *
  * The donor map draws the CURRENT (AECOM-edited) geometry. This overlays the
- * frozen NPS-original geometry (from the library bundle) so you can compare:
- *   AECOM      — original overlay hidden (you see your edited geometry)
- *   NPS        — original drawn solid orange on top
- *   NPS+AECOM  — original drawn as a dashed ghost under your edits
+ * frozen CLIENT-original geometry (from the library bundle) so you can compare:
+ *   AECOM          — original overlay hidden (you see your edited geometry)
+ *   CLIENT         — original drawn solid orange on top
+ *   AECOM + CLIENT — original drawn as a dashed ghost under your edits
  *
- * Until a route is actually edited, NPS == AECOM so the overlay coincides with
- * the base layer; the difference appears once vertices are moved.
+ * Until a route is actually edited, CLIENT == AECOM so the overlay coincides
+ * with the base layer; the difference appears once vertices are moved.
+ * (Internal state key 'nps' is retained for compatibility; the label is
+ * generic "CLIENT".)
  * ========================================================================= */
 (function () {
   'use strict';
@@ -20,7 +22,7 @@
 
   const getMap = () => (window._RW && window._RW.getMap ? window._RW.getMap() : null);
   const activeUnit = () => (window.RW2Library && window.RW2Library.getActive ? window.RW2Library.getActive() : null);
-  const label = () => (mode === 'nps' ? 'NPS' : mode === 'both' ? 'NPS + AECOM' : 'AECOM');
+  const label = () => (mode === 'nps' ? 'CLIENT' : mode === 'both' ? 'AECOM + CLIENT' : 'AECOM');
 
   async function drawOverlay() {
     const m = getMap();
@@ -45,7 +47,7 @@
     const b = document.getElementById('rw2-nps-toggle');
     if (!b) return;
     b.textContent = label();
-    b.title = 'Geometry shown: ' + label() + ' — tap to cycle NPS / AECOM / both';
+    b.title = 'Geometry shown: ' + label() + ' — tap to cycle AECOM / CLIENT / both';
     b.style.background = mode === 'aecom' ? '#fff' : '#e8710a';
     b.style.color = mode === 'aecom' ? '#12233b' : '#fff';
     b.style.borderColor = mode === 'aecom' ? '#d3dae1' : '#e8710a';
