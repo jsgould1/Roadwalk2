@@ -11554,8 +11554,8 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         status:         'prog',
         featureCount:   pinCount,
         meta:           s.type === 'area'
-                          ? `${s.project_code}${s.area_sqft ? ` · ${(s.area_sqft / 43560).toFixed(2)} ac` : ''}${pinCount ? ` · ${pinCount} pins` : ''}`
-                          : `${s.project_code} · ${s.mp_start.toFixed(2)} → ${s.mp_end.toFixed(2)} MP · ${pinCount} pins`,
+                          ? `${s.project_code || ''}${s.area_sqft ? ` · ${(s.area_sqft / 43560).toFixed(2)} ac` : ''}${pinCount ? ` · ${pinCount} pins` : ''}`
+                          : `${s.project_code || ''} · ${(s.mp_start || 0).toFixed(2)} → ${(s.mp_end || 0).toFixed(2)} MP · ${pinCount} pins`,
         kickoff:        true,
         center:         mid,
         alignment:      alignmentLL,
@@ -11575,6 +11575,14 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         scope_flag:     !!s.scope_flag,
         src_name:       s.src_name || s.name,
         merged_from:    s.merged_from || null,
+        // Exclusion holes (cut islands): bundle stores [lng,lat] → Leaflet [lat,lng].
+        holes:          (s.holes || []).map(function (ring) { return (ring || []).map(function (c) { return [c[1], c[0]]; }); }),
+        // Route Data + edit flags so a saved/opened project keeps its field work.
+        scope_data:     s.scope_data || undefined,
+        scope_custom:   s.scope_custom || undefined,
+        scope_confirmed: s.scope_confirmed || undefined,
+        _userAdded:     s._userAdded || undefined,
+        aecom_edited:   s.aecom_edited || undefined,
         pins:           s.pins || [],
       };
     });
@@ -14464,6 +14472,11 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       rip: s.rip || null, in_scope: !!s.in_scope, scope_name: s.scope_name || '', scope_section: s.scope_section || '', scope_flag: !!s.scope_flag,
       src_name: s.src_name || s.name, merged_from: s.merged_from || null,
       holes: (s.holes && s.holes.length) ? s.holes.map(toLngLat) : undefined,
+      scope_data: s.scope_data || undefined,
+      scope_custom: (s.scope_custom && s.scope_custom.length) ? s.scope_custom : undefined,
+      scope_confirmed: (s.scope_confirmed && Object.keys(s.scope_confirmed).length) ? s.scope_confirmed : undefined,
+      _userAdded: s._userAdded || undefined,
+      aecom_edited: s.aecom_edited || undefined,
       pins: s.pins || [],
     };
   }
@@ -30680,11 +30693,15 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
 
     // ── Step 1/6: Bundle (synchronous — already in memory) ──────
     onProgress(10);
-    // From-scratch projects have an empty bundle but their drawn routes live in
-    // SECTIONS — fold them in so they export + count as Routes & geometry.
+    // From-scratch projects: ALWAYS rebuild the exported bundle from the LIVE
+    // routes so it captures the current geometry + Route IDs. window.BUNDLE is
+    // not mutated by edits after a reload, so it goes stale — reading it would
+    // drop the very edits the user is trying to save. (Also covers the
+    // empty-bundle first-save case.) Imported parks keep their pristine bundle.
     const _bundleSecs = (result.bundle && result.bundle.sections) || [];
-    if (!_bundleSecs.length && Array.isArray(window.SECTIONS) && window.SECTIONS.length
-        && window._RW && typeof window._RW.bundleFromSections === 'function') {
+    if (window._RW && typeof window._RW.bundleFromSections === 'function'
+        && Array.isArray(window.SECTIONS) && window.SECTIONS.length
+        && ((window._RW.isScratchProject && window._RW.isScratchProject()) || !_bundleSecs.length)) {
       result.bundle = window._RW.bundleFromSections();
     }
     if (result.bundle && (result.bundle.sections || []).length) {
