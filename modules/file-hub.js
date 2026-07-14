@@ -19,6 +19,49 @@
     t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 3000);
   }
 
+  // ---- Open: a saved file (GeoJSON or project) OR the saved-parks library --
+  const openFileInput = document.createElement('input');
+  openFileInput.type = 'file'; openFileInput.accept = '.geojson,.json'; openFileInput.style.display = 'none';
+  openFileInput.addEventListener('change', async (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) { try { await handleOpenFile(f); } catch (err) { toast('Open failed: ' + err.message, true); } } });
+  (document.body || document.documentElement).appendChild(openFileInput);
+
+  async function handleOpenFile(file) {
+    let data; try { data = JSON.parse(await file.text()); } catch (_) { toast('Not a valid GeoJSON / project file', true); return; }
+    const base = file.name.replace(/\.[^.]+$/, '');
+    // GeoJSON export → open as a fresh project
+    if (data && data.type === 'FeatureCollection' && Array.isArray(data.features)) {
+      if (sections().length && !confirm('Open “' + file.name + '”?\nThis replaces the current working project.')) return;
+      if (RW().newProject) RW().newProject(base);
+      let rep = null;
+      if (window.RW2GeoIO && window.RW2GeoIO.importGeoJSON) rep = window.RW2GeoIO.importGeoJSON(data);
+      toast('Opened ' + (rep ? (rep.added.length + rep.replaced.length) : data.features.length) + ' routes');
+      render(); return;
+    }
+    // Project bundle or full export → restore
+    const bundle = (data && data.bundle) || (data && Array.isArray(data.sections) ? data : null);
+    if (bundle && Array.isArray(bundle.sections)) {
+      if (sections().length && !confirm('Open “' + file.name + '”?\nThis replaces the current project.')) return;
+      if (RW().loadBundle) { await RW().loadBundle(bundle, { freshImport: true }); toast('Project opened · ' + bundle.sections.length + ' routes'); }
+      render(); return;
+    }
+    toast('Unrecognized file — expected a GeoJSON or a project export', true);
+  }
+
+  function openChooser(anchor) {
+    const old = $('rw2-open-chooser'); if (old) old.remove();
+    const r = anchor ? anchor.getBoundingClientRect() : { bottom: 120, left: 40 };
+    const m = document.createElement('div');
+    m.id = 'rw2-open-chooser';
+    m.style.cssText = `position:fixed;top:${r.bottom + 6}px;left:${r.left}px;z-index:99999;background:#fff;border:1px solid #d3dae1;border-radius:10px;box-shadow:0 6px 24px rgba(20,35,60,.22);overflow:hidden;font:13px 'IBM Plex Sans',system-ui;min-width:230px`;
+    m.innerHTML =
+      `<button data-k="file" style="display:block;width:100%;text-align:left;padding:11px 15px;border:0;background:#fff;cursor:pointer;color:#12233b">📄 Open a file… <span style="color:#8a949f">(GeoJSON / project)</span></button>
+       <button data-k="lib" style="display:block;width:100%;text-align:left;padding:11px 15px;border:0;border-top:1px solid #eef1f4;background:#fff;cursor:pointer;color:#12233b">🗂 Saved parks…</button>`;
+    m.querySelector('[data-k="file"]').onclick = () => { m.remove(); openFileInput.click(); };
+    m.querySelector('[data-k="lib"]').onclick = () => { m.remove(); if (window.RW2Library && window.RW2Library.showPanel) window.RW2Library.showPanel(); else if (window.showProjectPicker) window.showProjectPicker('', true); };
+    document.body.appendChild(m);
+    setTimeout(() => document.addEventListener('click', function _c(ev) { if (!m.contains(ev.target)) { m.remove(); document.removeEventListener('click', _c); } }), 0);
+  }
+
   // ---- actions (each maps to an existing capability) --------------------
   const ACTIONS = {
     new() {
@@ -28,11 +71,7 @@
       if (RW().newProject) RW().newProject(name.trim() || 'Untitled Project');
       render(); toast('New project started');
     },
-    open() {
-      if (window.RW2Library && window.RW2Library.showPanel) window.RW2Library.showPanel();
-      else if (typeof window.showProjectPicker === 'function') window.showProjectPicker('', true);
-      else toast('Open unavailable', true);
-    },
+    open() { openChooser($('fh-tile-open')); },
     save() { click('dash-export-btn'); },
     saveas() {
       const cur = RW().getProjectName ? RW().getProjectName() : 'Project';
@@ -108,7 +147,7 @@
 
          ${group('File', [
         tile('new', '🆕', 'New', 'Blank project from scratch'),
-        tile('open', '📂', 'Open', 'Open a saved project'),
+        tile('open', '📂', 'Open', 'GeoJSON / project / saved parks'),
         tile('save', '💾', 'Save / Export', 'Download this project'),
         tile('saveas', '🏷️', 'Save As', 'Rename, then export'),
         tile('history', '🕘', 'History', 'Auto-saved snapshots · restore'),
