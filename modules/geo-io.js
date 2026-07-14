@@ -53,6 +53,18 @@
       scope_name: sec.scope_name || '', source: 'AECOM',
       aecom_edited: !!(sec.aecom_edited || (sec.holes && sec.holes.length)),
     };
+    // Route Data survey attributes: merged workbook + field edits, flattened as
+    // properties (GIS-friendly) plus a structured copy for exact app round-trip.
+    try {
+      const rd = (window.RW2RouteData && window.RW2RouteData.recordFor) ? (window.RW2RouteData.recordFor(sec) || {}) : (sec.scope_data || {});
+      Object.keys(rd).forEach((k) => { if (rd[k] != null && rd[k] !== '' && props[k] === undefined) props[k] = rd[k]; });
+      (sec.scope_custom || []).forEach((c) => { if (c && c.name) props[c.name] = c.value; });
+      const conf = Object.keys(sec.scope_confirmed || {});
+      if (conf.length) props.confirmed_fields = conf.join(', ');
+      props._route_data = { data: rd, custom: sec.scope_custom || [], confirmed: sec.scope_confirmed || {} };
+    } catch (_) {}
+    // Feature pins captured on this route (nested for a clean app round-trip).
+    if (Array.isArray(sec.pins) && sec.pins.length) { props.feature_count = sec.pins.length; props._pins = sec.pins; }
     let geometry;
     if (isArea && Array.isArray(sec.alignment) && sec.alignment.length >= 3) {
       const rings = [closeRing(orient(sec.alignment, true))]
@@ -110,6 +122,17 @@
     return null;
   }
 
+  // Restore route data (survey attributes) + feature pins from feature props.
+  function applyExtras(sec, props) {
+    const rd = props._route_data;
+    if (rd && typeof rd === 'object') {
+      if (rd.data && typeof rd.data === 'object') sec.scope_data = rd.data;
+      if (Array.isArray(rd.custom)) sec.scope_custom = rd.custom;
+      if (rd.confirmed && typeof rd.confirmed === 'object') sec.scope_confirmed = rd.confirmed;
+    }
+    if (Array.isArray(props._pins)) { sec.pins = props._pins; sec.featureCount = props._pins.length; }
+  }
+
   function importGeoJSON(fc) {
     if (!fc || fc.type !== 'FeatureCollection' || !Array.isArray(fc.features)) throw new Error('Not a GeoJSON FeatureCollection');
     const S = sections();
@@ -133,6 +156,7 @@
         if (props.route_id) target.route_id = props.route_id;
         if (typeof props.in_scope === 'boolean') target.in_scope = props.in_scope;
         target.aecom_edited = true;
+        applyExtras(target, props);
         rep.replaced.push(target.id);
       } else {
         const id = props.id || `${unit || 'AECOM'}-AECOM-${String(seq++).padStart(3, '0')}`;
@@ -147,6 +171,7 @@
           src_name: props.name || id, source: 'AECOM', _userAdded: true, aecom_edited: true,
           featureCount: 0, pins: [],
         };
+        applyExtras(nu, props);
         S.push(nu);
         rep.added.push(id);
       }
