@@ -51,13 +51,17 @@ ROUTES_LAYER = "AllRIPRoutes"
 LOTS_LAYER = "Area_Conditions"
 SEGS_LAYER = "Route_Conditions_20th"
 
-# Segment attributes worth carrying. Everything else on that layer (park,
-# owner, route name, from/to text, asset code ...) is identical for every
-# segment of a route and is inherited from the parent route record instead.
+# Segment attributes worth carrying. Dropped instead: park, owner, route name,
+# from/to text and asset code, which are identical for every segment of a
+# route and are inherited from the parent route record. Physical and
+# work-quantity fields ARE kept even though they often repeat, because they
+# can legitimately change part-way along a route and reviewers ask for them.
 SEG_FIELDS = [
     "PARK_ALPHA", "ROUTE_IDENT", "BEG_MP", "END_MP", "INT_LENGTH",
     "CONDITION_RATING", "QR", "PCR", "RCI", "SCR", "IRI_AVG", "RUT_AVG",
     "SC_INDEX", "AC_INDEX", "LC_INDEX", "TC_INDEX", "PATCH_INDEX",
+    "SURF_TYPE", "NO_LANES", "LANE_WIDTH", "SPEED", "Status",
+    "API", "FCI", "UM", "Quantity",
     "IMAGE_NAME", "VIDEO",
 ]
 

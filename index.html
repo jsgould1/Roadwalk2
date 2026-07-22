@@ -101,8 +101,8 @@
 <script src="modules/library.js" defer></script>
 <script src="modules/route-tools.js" defer></script>
 <script src="modules/aecom-toggle.js?v=2" defer></script>
-<script src="modules/rip-data.js?v=1" defer></script>
-<script src="modules/rip-import.js?v=1" defer></script>
+<script src="modules/rip-data.js?v=3" defer></script>
+<script src="modules/rip-import.js?v=2" defer></script>
 <script src="modules/scope-assign.js?v=5" defer></script>
 <script src="modules/sections-table.js" defer></script>
 <script src="modules/route-menu.js?v=7" defer></script>
@@ -11581,6 +11581,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         route_id:       s.route_id || '',
         faclocid:       s.faclocid || '',
         rip:            s.rip || null,
+        rip_custom:     s.rip_custom || undefined,
         in_scope:       !!s.in_scope,
         scope_name:     s.scope_name || '',
         scope_section:  s.scope_section || '',
@@ -14486,7 +14487,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       sub_alignments: (s.subAlignments || []).map((sa) => ({ role: sa.role, name: sa.name, length_ft: sa.lengthFt, coordinates: toLngLat(sa.coords) })),
       pathweb_refs: s.pathwebRefs, project_code: s.projectCode, mp_start: s.mpStart, mp_end: s.mpEnd,
       area_sqft: s.area_sqft, uid: s.uid, route_id: s.route_id || '', faclocid: s.faclocid || '',
-      rip: s.rip || null, in_scope: !!s.in_scope, scope_name: s.scope_name || '', scope_section: s.scope_section || '', scope_flag: !!s.scope_flag,
+      rip: s.rip || null, rip_custom: s.rip_custom || undefined, in_scope: !!s.in_scope, scope_name: s.scope_name || '', scope_section: s.scope_section || '', scope_flag: !!s.scope_flag,
       src_name: s.src_name || s.name, merged_from: s.merged_from || null,
       holes: (s.holes && s.holes.length) ? s.holes.map(toLngLat) : undefined,
       scope_data: s.scope_data || undefined,
@@ -14730,7 +14731,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       alignment: alignmentLL, subAlignments: subAlignmentsLL,
       pathwebRefs: s.pathweb_refs, projectCode: s.project_code, mpStart: s.mp_start, mpEnd: s.mp_end,
       area_sqft: s.area_sqft, uid: s.uid, route_id: s.route_id || '', faclocid: s.faclocid || '',
-      rip: s.rip || null, in_scope: !!s.in_scope, scope_name: s.scope_name || '',
+      rip: s.rip || null, rip_custom: s.rip_custom || undefined, in_scope: !!s.in_scope, scope_name: s.scope_name || '',
       scope_section: s.scope_section || '', scope_flag: !!s.scope_flag,
       src_name: s.src_name || s.name, merged_from: s.merged_from || null,
       pins: (s.pins || []).map((p) => Object.assign({}, p, { _bundle: true })),

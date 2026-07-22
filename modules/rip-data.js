@@ -1,20 +1,23 @@
 /* =========================================================================
  * rip-data.js — the RIP module: filterable review of an imported NPS RIP
- * Cycle 6 park, over two tabs on one shared filter set.
+ * Cycle 6 park, across several tabs over one shared filter set.
  *
- *   Assets      one row per road / lot (the inventory), with the in-scope
- *               toggle -- this is where scope actually gets built
+ *   Assets      one row per road / lot (the inventory) + in-scope toggle
  *   Conditions  one row per 0.02 mi (105.6 ft) segment
+ *   Geometry    per-feature geometry facts (parts, vertices, length/area, MP)
+ *   Custom      user-defined columns, editable per asset, exported
  *
- * Scope is meant to be built by filtering and then applying in bulk ("set
- * filtered in scope"), not by tapping 250 routes one at a time.
+ * Everything from the geodatabase is available: the table shows a chosen set
+ * of columns (Columns… picker), and clicking any row opens a drawer with
+ * every field grouped. Scope is built in bulk (filter, then "set filtered in
+ * scope"), not by tapping hundreds of routes.
  *
- * Two facts about this dataset drive the UI:
- *  - -1 means "not measured" and the slicer already nulled it, so a blank
- *    cell is genuinely blank and must never be coloured as a bad score.
- *  - lots carry NO distress data at all (RCI/SCR/IRI/RUT and the five
- *    distress indices are -1 on 100% of rows), so those columns and metrics
- *    are hidden whenever the view is lots-only.
+ * Two dataset facts shape the UI:
+ *  - -1 means "not measured"; the slicer nulled it, so a blank cell is truly
+ *    blank and is never coloured as a bad score. A metric range excludes
+ *    blanks rather than treating them as zero.
+ *  - lots carry NO distress data (RCI/SCR/IRI/RUT + the five indices are -1
+ *    on 100% of rows), so those metrics/columns hide when the view is lots.
  * ========================================================================= */
 (function () {
   'use strict';
@@ -25,83 +28,122 @@
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-  // Rows rendered at once. A big park has 26,000 segments and building that
-  // many <tr> locks the tab up, so the table pages -- and always says so,
-  // because a silent cap reads as "this is everything".
-  const PAGE = 300;
+  const PAGE = 300;   // rows rendered before "show more"; big parks have 26k
 
-  // ---- metrics ----------------------------------------------------------
-  // dir:'high' = bigger is better (0-100 scores); dir:'low' = smaller is
-  // better (roughness, rutting, condition index).
-  const METRICS = {
-    PCR:              { label: 'PCR',    dir: 'high', max: 100, both: true },
-    CONDITION_RATING: { label: 'Cond',   dir: 'high', max: 100, both: true },
-    SCR:              { label: 'SCR',    dir: 'high', max: 100 },
-    RCI:              { label: 'RCI',    dir: 'high', max: 100 },
-    SC_INDEX:         { label: 'Surface',dir: 'high', max: 100 },
-    AC_INDEX:         { label: 'Alligator', dir: 'high', max: 100 },
-    LC_INDEX:         { label: 'Long.',  dir: 'high', max: 100 },
-    TC_INDEX:         { label: 'Trans.', dir: 'high', max: 100 },
-    PATCH_INDEX:      { label: 'Patch',  dir: 'high', max: 100 },
-    RUT_INDEX:        { label: 'Rut idx',dir: 'high', max: 100 },
-    IRI_AVG:          { label: 'IRI',    dir: 'low',  max: 400 },
-    RUT_AVG:          { label: 'Rut',    dir: 'low',  max: 1 },
-    FCI:              { label: 'FCI',    dir: 'low',  max: 1, both: true },
+  // ---- field catalog ----------------------------------------------------
+  // label (l) + group (g) for every gdb field, plus a few synthetic columns.
+  // Anything not listed falls back to a humanised key and the "Other" group.
+  const GROUPS = ['Identity', 'Ownership', 'Location', 'Physical',
+                  'Condition', 'Distress', 'Work', 'Media', 'Custom', 'Other'];
+  const F = {
+    ROUTE_IDENT: { l: 'Route ID', g: 'Identity' }, FMSS_NO: { l: 'FMSS #', g: 'Identity' },
+    RTE_NAME: { l: 'Route name', g: 'Identity' }, RTE_NO: { l: 'Route #', g: 'Identity' },
+    RTE_SERIES: { l: 'Series', g: 'Identity' }, PARK_ALPHA: { l: 'Park', g: 'Identity' },
+    FEATURE_CLASS: { l: 'Feature class', g: 'Identity' }, ASSET_CODE: { l: 'Asset code', g: 'Identity' },
+    Asset_Code: { l: 'Asset code', g: 'Identity' }, FACILITY_TYPE: { l: 'Facility type', g: 'Identity' },
+    OWNER: { l: 'Owner', g: 'Ownership' }, MAINTAINER: { l: 'Maintainer', g: 'Ownership' },
+    FLTP: { l: 'FLTP', g: 'Ownership' }, USER_ACCESS: { l: 'Access', g: 'Ownership' },
+    UNPAVED: { l: 'Unpaved', g: 'Ownership' }, FUNCT_CLASS: { l: 'Functional class', g: 'Ownership' },
+    STATE1: { l: 'State', g: 'Ownership' }, STATE2: { l: 'State 2', g: 'Ownership' }, STATE3: { l: 'State 3', g: 'Ownership' },
+    FROM_DESC: { l: 'From', g: 'Location' }, TO_DESC: { l: 'To', g: 'Location' },
+    BEG_MP_DCV: { l: 'Begin MP', g: 'Location', u: 'mi', d: 3 }, END_MP_DCV: { l: 'End MP', g: 'Location', u: 'mi', d: 3 },
+    BEG_MP: { l: 'Begin MP', g: 'Location', u: 'mi', d: 2 }, END_MP: { l: 'End MP', g: 'Location', u: 'mi', d: 2 },
+    INT_LENGTH: { l: 'Segment length', g: 'Location', u: 'ft', d: 1 }, RTE_LENGTH: { l: 'Route length', g: 'Location', u: 'mi', d: 3 },
+    PAVED_MI: { l: 'Paved', g: 'Location', u: 'mi', d: 3 }, UNPAVED_MI: { l: 'Unpaved', g: 'Location', u: 'mi', d: 3 },
+    CENT_LAT: { l: 'Centroid lat', g: 'Location' }, CENT_LONG: { l: 'Centroid lng', g: 'Location' },
+    SQ_FEET: { l: 'Area', g: 'Location', u: 'sf' },
+    SURF_TYPE: { l: 'Surface', g: 'Physical' }, PAVEMENT_TREATMENT: { l: 'Treatment', g: 'Physical' },
+    NO_LANES: { l: 'Lanes', g: 'Physical' }, LANE_WIDTH: { l: 'Lane width', g: 'Physical', u: 'ft' },
+    SPEED: { l: 'Speed', g: 'Physical', u: 'mph' }, CURB: { l: 'Curb', g: 'Physical' },
+    CURB_GUTTER: { l: 'Curb & gutter', g: 'Physical' }, CURB_RECOMMENDATION: { l: 'Curb rec.', g: 'Physical' },
+    RIP_CYCLE: { l: 'RIP cycle', g: 'Condition' }, RIP_ITERATION: { l: 'Iteration', g: 'Condition' },
+    INSP_DATE: { l: 'Inspected', g: 'Condition' }, M_RATING: { l: 'M rating', g: 'Condition' },
+    CONDITION_RATING: { l: 'Condition', g: 'Condition' }, QR: { l: 'QR', g: 'Condition' },
+    PCR: { l: 'PCR', g: 'Condition' }, RCI: { l: 'RCI', g: 'Condition' }, SCR: { l: 'SCR', g: 'Condition' },
+    IRI_AVG: { l: 'IRI', g: 'Condition' }, RUT_AVG: { l: 'Rut', g: 'Condition' }, RUT_INDEX: { l: 'Rut index', g: 'Condition' },
+    Status: { l: 'Status', g: 'Condition' },
+    SC_INDEX: { l: 'Surface idx', g: 'Distress' }, AC_INDEX: { l: 'Alligator idx', g: 'Distress' },
+    LC_INDEX: { l: 'Long. crack idx', g: 'Distress' }, TC_INDEX: { l: 'Trans. crack idx', g: 'Distress' },
+    PATCH_INDEX: { l: 'Patch idx', g: 'Distress' },
+    API: { l: 'API', g: 'Work' }, FCI: { l: 'FCI', g: 'Work' }, UM: { l: 'Unit', g: 'Work' }, Quantity: { l: 'Quantity', g: 'Work' },
+    IMAGE_NAME: { l: 'Image', g: 'Media' }, VIDEO: { l: 'Video', g: 'Media' },
+    // synthetic
+    kind: { l: 'Kind', g: 'Identity', syn: true }, size: { l: 'Size', g: 'Location', syn: true, num: true },
+    station: { l: 'MP range', g: 'Location', syn: true },
   };
-  // Metrics that exist for parking lots. Everything else is -1 on every lot.
-  const LOT_METRICS = ['PCR', 'CONDITION_RATING', 'FCI'];
+  const humanize = (k) => k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const meta = (k) => F[k] || (F[k] = { l: humanize(k), g: 'Other' });
+  // Column label, resolving custom "cust:<key>" columns to their field label.
+  function colLabel(k) {
+    if (k.slice(0, 5) === 'cust:') { const c = state.custom.find((x) => x.key === k.slice(5)); return c ? c.label : k.slice(5); }
+    return meta(k).l;
+  }
+  const numFmt = (v, d) => (d != null ? Number(v).toFixed(d) : (Number.isInteger(v) ? v : Number(v).toFixed(2)));
 
+  // ---- metrics (numeric fields that get a colour ramp) ------------------
+  const METRICS = {
+    PCR: { dir: 'high', max: 100 }, CONDITION_RATING: { dir: 'high', max: 100 },
+    SCR: { dir: 'high', max: 100 }, RCI: { dir: 'high', max: 100 },
+    SC_INDEX: { dir: 'high', max: 100 }, AC_INDEX: { dir: 'high', max: 100 },
+    LC_INDEX: { dir: 'high', max: 100 }, TC_INDEX: { dir: 'high', max: 100 },
+    PATCH_INDEX: { dir: 'high', max: 100 }, RUT_INDEX: { dir: 'high', max: 100 },
+    IRI_AVG: { dir: 'low', max: 400 }, RUT_AVG: { dir: 'low', max: 1 }, FCI: { dir: 'low', max: 1 },
+  };
+  const LOT_METRICS = ['PCR', 'CONDITION_RATING', 'FCI'];
   const RAMP = ['#d73027', '#fdae61', '#fee08b', '#a6d96a', '#1a9850'];
   const NO_DATA = '#b8c0c8';
+  function norm(m, v) {
+    const d = METRICS[m]; if (!d || v == null || isNaN(v)) return null;
+    const t = Math.max(0, Math.min(1, Number(v) / d.max));
+    return d.dir === 'low' ? 1 - t : t;
+  }
+  function colorFor(m, v) { const n = norm(m, v); return n == null ? NO_DATA : RAMP[Math.min(4, Math.floor(n * 5))]; }
 
-  // 0 (worst) .. 1 (best) for a metric value, honouring direction.
-  function norm(metric, v) {
-    const m = METRICS[metric]; if (!m || v == null || isNaN(v)) return null;
-    const t = Math.max(0, Math.min(1, Number(v) / m.max));
-    return m.dir === 'low' ? 1 - t : t;
-  }
-  function colorFor(metric, v) {
-    const n = norm(metric, v);
-    if (n == null) return NO_DATA;
-    return RAMP[Math.min(RAMP.length - 1, Math.floor(n * RAMP.length))];
-  }
+  // ---- default columns per tab ------------------------------------------
+  const DEFAULT_COLS = {
+    assets: ['ROUTE_IDENT', 'RTE_NAME', 'kind', 'SURF_TYPE', 'size', 'PCR', 'M_RATING'],
+    conditions: ['ROUTE_IDENT', 'RTE_NAME', 'station', 'PCR', 'SC_INDEX', 'AC_INDEX', 'LC_INDEX', 'TC_INDEX', 'PATCH_INDEX', 'QR'],
+  };
+  // Fields offered in the Columns… picker, per tab (order = display order).
+  const COL_MENU = {
+    assets: ['ROUTE_IDENT', 'RTE_NAME', 'kind', 'FMSS_NO', 'FACILITY_TYPE', 'ASSET_CODE',
+      'SURF_TYPE', 'size', 'SQ_FEET', 'RTE_LENGTH', 'NO_LANES', 'LANE_WIDTH', 'SPEED',
+      'USER_ACCESS', 'UNPAVED', 'FLTP', 'OWNER', 'MAINTAINER', 'FUNCT_CLASS', 'RTE_SERIES', 'STATE1',
+      'BEG_MP_DCV', 'END_MP_DCV', 'PAVED_MI', 'UNPAVED_MI',
+      'PAVEMENT_TREATMENT', 'CURB', 'CURB_GUTTER', 'CURB_RECOMMENDATION',
+      'PCR', 'CONDITION_RATING', 'M_RATING', 'QR', 'SCR', 'RCI', 'IRI_AVG', 'RUT_INDEX',
+      'SC_INDEX', 'AC_INDEX', 'LC_INDEX', 'TC_INDEX', 'PATCH_INDEX',
+      'API', 'FCI', 'UM', 'Quantity', 'INSP_DATE', 'RIP_ITERATION', 'FROM_DESC', 'TO_DESC'],
+    conditions: ['ROUTE_IDENT', 'RTE_NAME', 'station', 'INT_LENGTH', 'SURF_TYPE', 'NO_LANES',
+      'LANE_WIDTH', 'SPEED', 'Status', 'CONDITION_RATING', 'QR', 'PCR', 'SCR', 'RCI', 'IRI_AVG',
+      'RUT_AVG', 'SC_INDEX', 'AC_INDEX', 'LC_INDEX', 'TC_INDEX', 'PATCH_INDEX',
+      'API', 'FCI', 'UM', 'Quantity', 'IMAGE_NAME', 'VIDEO'],
+  };
 
   // ---- state ------------------------------------------------------------
   const state = {
-    park: null,
-    bundle: null,          // { park, cycle, states, bbox, counts }
-    segments: [],          // all 0.02 mi segments
-    segsByRoute: new Map(),
-    tab: 'assets',
-    metric: 'PCR',
-    limit: PAGE,
+    park: null, bundle: null, segments: [], segsByRoute: new Map(),
+    tab: 'assets', metric: 'PCR', limit: PAGE,
     sort: { key: 'ROUTE_IDENT', dir: 1 },
-    q: '',
-    kind: 'all',           // all | road | lot
-    scope: 'all',          // all | in | out
-    facets: {},            // field -> selected value ('' = any)
-    range: { min: '', max: '' },
+    q: '', kind: 'all', scope: 'all', facets: {}, range: { min: '', max: '' },
+    cols: { assets: DEFAULT_COLS.assets.slice(), conditions: DEFAULT_COLS.conditions.slice() },
+    custom: [],        // [{ key, label }]
+    colMenuOpen: false,
   };
 
-  // Facets offered in the filter rail, in order. Only those with more than
-  // one distinct value in the current park are rendered.
   const FACETS = [
     ['SURF_TYPE', 'Surface'], ['FACILITY_TYPE', 'Facility'], ['USER_ACCESS', 'Access'],
-    ['UNPAVED', 'Unpaved'], ['FLTP', 'FLTP'], ['OWNER', 'Owner'],
-    ['M_RATING', 'Rating'], ['RTE_SERIES', 'Series'], ['CURB', 'Curb'],
-    ['PAVEMENT_TREATMENT', 'Treatment'], ['Status', 'Status'],
+    ['UNPAVED', 'Unpaved'], ['FLTP', 'FLTP'], ['OWNER', 'Owner'], ['M_RATING', 'Rating'],
+    ['RTE_SERIES', 'Series'], ['CURB', 'Curb'], ['PAVEMENT_TREATMENT', 'Treatment'], ['Status', 'Status'],
   ];
 
   // ---- persistence ------------------------------------------------------
-  // The park payload is far too big for the project bundle, so it lives in
-  // its own IndexedDB store and is re-attached on reload.
   const DB = 'roadwalk2_rip', STORE = 'rip';
   function idb() {
     return new Promise((res, rej) => {
       const rq = indexedDB.open(DB, 1);
       rq.onupgradeneeded = () => { if (!rq.result.objectStoreNames.contains(STORE)) rq.result.createObjectStore(STORE); };
-      rq.onsuccess = () => res(rq.result);
-      rq.onerror = () => rej(rq.error);
+      rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
     });
   }
   async function save() {
@@ -112,6 +154,7 @@
         const tx = db.transaction(STORE, 'readwrite');
         tx.objectStore(STORE).put({
           park: state.park, bundle: state.bundle, segments: state.segments,
+          cols: state.cols, custom: state.custom,
         }, 'active');
         tx.oncomplete = res; tx.onerror = () => rej(tx.error);
       });
@@ -125,67 +168,60 @@
         const rq = tx.objectStore(STORE).get('active');
         rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
       });
-      if (rec && rec.bundle) hydrate(rec.bundle, rec.segments || []);
+      if (rec && rec.bundle) {
+        hydrate(rec.bundle, rec.segments || []);
+        if (rec.cols) state.cols = rec.cols;
+        if (Array.isArray(rec.custom)) state.custom = rec.custom;
+      }
     } catch (e) { /* nothing stored yet */ }
   }
 
   function hydrate(bundle, segments) {
     state.park = bundle.park;
-    state.bundle = { park: bundle.park, cycle: bundle.cycle, states: bundle.states,
-                     bbox: bundle.bbox, counts: bundle.counts };
+    state.bundle = { park: bundle.park, cycle: bundle.cycle, states: bundle.states, bbox: bundle.bbox, counts: bundle.counts };
     state.segments = segments;
     state.segsByRoute = new Map();
     for (const s of segments) {
-      const k = s.ROUTE_IDENT;
-      let a = state.segsByRoute.get(k);
-      if (!a) state.segsByRoute.set(k, a = []);
-      a.push(s);
+      const k = s.ROUTE_IDENT; let a = state.segsByRoute.get(k);
+      if (!a) state.segsByRoute.set(k, a = []); a.push(s);
     }
     for (const a of state.segsByRoute.values()) a.sort((x, y) => (x.BEG_MP || 0) - (y.BEG_MP || 0));
   }
-
-  function attach(bundle) {
-    hydrate(bundle, bundle.segments || []);
-    state.limit = PAGE;
-    save();
-  }
+  function attach(bundle) { hydrate(bundle, bundle.segments || []); state.limit = PAGE; save(); }
 
   // ---- data views -------------------------------------------------------
-  const ripOf = (sec) => (sec && sec.rip) || {};
-  function ripSections() { return sections().filter((s) => s.rip); }
+  const ripOf = (s) => (s && s.rip) || {};
+  const ripSections = () => sections().filter((s) => s.rip);
 
-  function passesFacets(attrs, kindOk) {
+  function passesFacets(a, kindOk) {
     if (!kindOk) return false;
     for (const k in state.facets) {
       const want = state.facets[k];
-      if (want === '' || want == null) continue;
-      if (String(attrs[k] == null ? '' : attrs[k]) !== want) return false;
+      if (want == null || want === '') continue;
+      if (String(a[k] == null ? '' : a[k]) !== want) return false;
     }
     return true;
   }
-
   function inRange(v) {
     const lo = state.range.min === '' ? null : Number(state.range.min);
     const hi = state.range.max === '' ? null : Number(state.range.max);
     if (lo == null && hi == null) return true;
-    if (v == null || isNaN(v)) return false;           // blank fails an explicit range
+    if (v == null || isNaN(v)) return false;
     if (lo != null && v < lo) return false;
     if (hi != null && v > hi) return false;
     return true;
   }
-
-  function matchQ(sec, attrs) {
+  function matchQ(sec, a) {
     if (!state.q) return true;
     const q = state.q.toUpperCase();
     return String(sec.route_id || '').toUpperCase().includes(q)
-        || String(sec.name || '').toUpperCase().includes(q)
-        || String(attrs.FMSS_NO || '').toUpperCase().includes(q);
+      || String(sec.name || '').toUpperCase().includes(q)
+      || String(a.FMSS_NO || '').toUpperCase().includes(q);
   }
 
   function filteredAssets() {
     return ripSections().filter((sec) => {
-      const a = ripOf(sec);
-      const isLot = sec.type === 'area';
+      const a = ripOf(sec), isLot = sec.type === 'area';
       const kindOk = state.kind === 'all' || (state.kind === 'lot') === isLot;
       if (!passesFacets(a, kindOk)) return false;
       if (state.scope === 'in' && !sec.in_scope) return false;
@@ -195,18 +231,14 @@
       return true;
     });
   }
-
-  // Conditions inherit their parent route's attributes for filtering, so the
-  // same rail drives both tabs, but the metric range applies to the segment.
   function filteredConditions() {
     const parents = new Map();
-    for (const sec of ripSections()) if (sec.route_id) parents.set(sec.route_id, sec);
+    for (const s of ripSections()) if (s.route_id) parents.set(s.route_id, s);
     const out = [];
     for (const seg of state.segments) {
-      const sec = parents.get(seg.ROUTE_IDENT);
-      if (!sec) continue;
+      const sec = parents.get(seg.ROUTE_IDENT); if (!sec) continue;
       const a = ripOf(sec);
-      const kindOk = state.kind === 'all' || state.kind === 'road';   // segments are roads
+      const kindOk = state.kind === 'all' || state.kind === 'road';
       if (!passesFacets(a, kindOk)) continue;
       if (state.scope === 'in' && !sec.in_scope) continue;
       if (state.scope === 'out' && sec.in_scope) continue;
@@ -216,282 +248,458 @@
     }
     return out;
   }
-
-  // Which metrics make sense right now -- lots have no distress data.
   function availableMetrics() {
     const lotsOnly = state.kind === 'lot';
     return Object.keys(METRICS).filter((k) =>
       state.tab === 'conditions' ? k !== 'FCI' : (!lotsOnly || LOT_METRICS.includes(k)));
   }
 
+  // value getters honour synthetic + custom columns
+  function assetVal(sec, key) {
+    if (key === 'kind') return sec.type === 'area' ? 'Lot' : 'Road';
+    if (key === 'size') return sec.type === 'area' ? (ripOf(sec).SQ_FEET || null) : (ripOf(sec).RTE_LENGTH || null);
+    if (key.slice(0, 5) === 'cust:') return (sec.rip_custom || {})[key.slice(5)];
+    return ripOf(sec)[key];
+  }
+  function condVal(row, key) {
+    const { seg, sec } = row;
+    if (key === 'ROUTE_IDENT') return seg.ROUTE_IDENT;
+    if (key === 'RTE_NAME') return sec.name;
+    if (key === 'station') return seg.BEG_MP;
+    const v = seg[key];
+    return v != null ? v : ripOf(sec)[key];      // inherit route attr if absent
+  }
+
   function sortRows(rows, get) {
     const { key, dir } = state.sort;
     return rows.slice().sort((r1, r2) => {
-      const a = get(r1, key), b = get(r2, key);
+      let a = get(r1, key), b = get(r2, key);
       const an = a == null || a === '', bn = b == null || b === '';
-      if (an && bn) return 0;
-      if (an) return 1;                 // blanks always sink
-      if (bn) return -1;
+      if (an && bn) return 0; if (an) return 1; if (bn) return -1;
       if (typeof a === 'number' && typeof b === 'number') return (a - b) * dir;
       return String(a).localeCompare(String(b)) * dir;
     });
+  }
+
+  // ---- geometry facts ---------------------------------------------------
+  function haversineFt(a, b) {
+    const R = 20925524.9;   // earth radius, feet
+    const dLat = (b[0] - a[0]) * Math.PI / 180, dLng = (b[1] - a[1]) * Math.PI / 180;
+    const la1 = a[0] * Math.PI / 180, la2 = b[0] * Math.PI / 180;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+  function geomFacts(sec) {
+    const al = sec.alignment || [], holes = sec.holes || [];
+    let vtx = al.length + holes.reduce((n, h) => n + h.length, 0);
+    let box = [90, 180, -90, -180];
+    const scan = (r) => r.forEach((p) => { if (p[0] < box[0]) box[0] = p[0]; if (p[1] < box[1]) box[1] = p[1]; if (p[0] > box[2]) box[2] = p[0]; if (p[1] > box[3]) box[3] = p[1]; });
+    scan(al); holes.forEach(scan);
+    let lengthFt = null, areaSf = null;
+    if (sec.type === 'linear') { lengthFt = 0; for (let i = 1; i < al.length; i++) lengthFt += haversineFt(al[i - 1], al[i]); }
+    else areaSf = ripOf(sec).SQ_FEET || sec.area_sqft || null;
+    return { vtx, holes: holes.length, box: (box[0] <= box[2] ? box : null), lengthFt, areaSf };
   }
 
   // ---- bulk scope -------------------------------------------------------
   function setFilteredScope(on) {
     const rows = filteredAssets();
     if (!rows.length) return;
-    const verb = on ? 'in scope' : 'out of scope';
-    if (!confirm('Set ' + rows.length + ' filtered route' + (rows.length === 1 ? '' : 's') + ' ' + verb + '?')) return;
+    if (!confirm('Set ' + rows.length + ' filtered route' + (rows.length === 1 ? '' : 's') + (on ? ' in scope?' : ' out of scope?'))) return;
     rows.forEach((s) => { s.in_scope = !!on; });
     if (RW().persistSections) RW().persistSections();
     if (RW().rerender) RW().rerender();
     render();
   }
 
-  // ---- render -----------------------------------------------------------
-  function chip(label, active, attrs) {
-    return `<button ${attrs} style="border:1px solid ${active ? '#0B3D66' : '#d3dae1'};
-      background:${active ? '#0B3D66' : '#fff'};color:${active ? '#fff' : '#12233b'};
-      border-radius:999px;padding:5px 12px;cursor:pointer;font:600 12.5px 'IBM Plex Sans',system-ui">${esc(label)}</button>`;
+  // ---- CSV export -------------------------------------------------------
+  function download(name, text) {
+    const blob = new Blob([text], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+  const csvCell = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  function exportCSV() {
+    const park = state.park || 'park';
+    let cols, header, rows;
+    if (state.tab === 'assets') {
+      cols = displayCols('assets');
+      header = ['In scope', ...cols.map((k) => colLabel(k))];
+      rows = filteredAssets().map((s) => [s.in_scope ? 'YES' : '', ...cols.map((k) => assetVal(s, k))]);
+    } else if (state.tab === 'conditions') {
+      cols = displayCols('conditions');
+      header = cols.map((k) => meta(k).l);
+      rows = filteredConditions().map((r) => cols.map((k) => condVal(r, k)));
+    } else if (state.tab === 'geometry') {
+      header = ['Route ID', 'Name', 'Kind', 'Vertices', 'Holes', 'Length (ft)', 'Area (sf)', 'Begin MP', 'End MP', 'S', 'W', 'N', 'E'];
+      rows = filteredAssets().map((s) => { const g = geomFacts(s), a = ripOf(s);
+        return [s.route_id, s.name, s.type === 'area' ? 'Lot' : 'Road', g.vtx, g.holes,
+          g.lengthFt != null ? g.lengthFt.toFixed(1) : '', g.areaSf || '',
+          a.BEG_MP_DCV, a.END_MP_DCV, ...(g.box || ['', '', '', ''])]; });
+    } else { return; }
+    const csv = [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
+    download('RIP_' + park + '_' + state.tab + '.csv', csv);
   }
 
+  // ---- shared rendering helpers -----------------------------------------
+  function displayCols(tab) {
+    const base = state.cols[tab] || DEFAULT_COLS[tab].slice();
+    if (tab === 'assets') return base.concat(state.custom.map((c) => 'cust:' + c.key));
+    return base;
+  }
+  function fmtVal(key, v) {
+    if (v == null || v === '') return null;
+    const m = meta(key);
+    if (typeof v === 'number' && (m.u || m.d != null)) {
+      const s = numFmt(v, m.d);
+      return m.u === 'sf' ? Number(v).toLocaleString() + ' sf' : m.u ? s + ' ' + m.u : s;
+    }
+    return v;
+  }
+  function cell(key, v, opts) {
+    opts = opts || {};
+    const disp = key === 'size'
+      ? (v == null ? null : (opts.isLot ? Number(v).toLocaleString() + ' sf' : Number(v).toFixed(3) + ' mi'))
+      : fmtVal(key, v);
+    const align = (meta(key).u || meta(key).num || typeof v === 'number') ? 'right' : 'left';
+    if (disp == null) return '<td style="padding:5px 9px;color:#c3cad2;text-align:' + align + '">—</td>';
+    if (METRICS[key]) {
+      return '<td style="padding:5px 9px;text-align:right;font-variant-numeric:tabular-nums"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:'
+        + colorFor(key, v) + ';margin-right:6px"></span>' + esc(disp) + '</td>';
+    }
+    const mono = key === 'ROUTE_IDENT';
+    return '<td style="padding:5px 9px;text-align:' + align + (key === 'RTE_NAME' ? ';max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' : '')
+      + (mono ? ";font:700 12px 'IBM Plex Mono',monospace;color:#0B3D66;white-space:nowrap" : ';color:#3a4653') + '">' + esc(disp) + '</td>';
+  }
+  function th(key, label) {
+    const on = state.sort.key === key;
+    const align = (meta(key).u || meta(key).num || METRICS[key] || key === 'station' || key === 'size') ? 'right' : 'left';
+    return '<th data-sort="' + key + '" style="position:sticky;top:0;background:#f7f9fb;z-index:1;text-align:' + align
+      + ';padding:7px 9px;border-bottom:1px solid #e3e8ee;cursor:pointer;font:700 11.5px system-ui;color:#12233b;white-space:nowrap">'
+      + esc(label) + (on ? (state.sort.dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
+  }
+
+  // ---- tables -----------------------------------------------------------
+  function assetsTable() {
+    const cols = displayCols('assets');
+    const rows = sortRows(filteredAssets(), (s, k) => k === 'ROUTE_IDENT' ? s.route_id : k === 'RTE_NAME' ? s.name : assetVal(s, k));
+    const shown = rows.slice(0, state.limit);
+    const body = shown.map((s) => {
+      const isLot = s.type === 'area';
+      return '<tr data-detail="' + esc(s.id) + '" style="border-bottom:1px solid #f2f5f8;cursor:pointer">'
+        + '<td style="padding:5px 9px" data-nodetail="1"><input type="checkbox" data-scope="' + esc(s.id) + '"' + (s.in_scope ? ' checked' : '') + '></td>'
+        + cols.map((k) => k === 'ROUTE_IDENT' ? cell(k, s.route_id) : k === 'RTE_NAME' ? cell(k, s.name) : cell(k, assetVal(s, k), { isLot })).join('')
+        + '<td style="padding:5px 9px" data-nodetail="1"><button data-goto="' + esc(s.id) + '" title="Show on map" style="border:0;background:transparent;cursor:pointer;font-size:14px">🗺</button></td></tr>';
+    }).join('');
+    return { total: rows.length, shown: shown.length, html:
+      '<table style="width:100%;border-collapse:collapse;font:13px system-ui"><thead><tr>'
+      + '<th style="position:sticky;top:0;background:#f7f9fb;z-index:1;padding:7px 9px;border-bottom:1px solid #e3e8ee;width:26px"></th>'
+      + cols.map((k) => th(k, colLabel(k))).join('')
+      + '<th style="position:sticky;top:0;background:#f7f9fb;border-bottom:1px solid #e3e8ee;width:30px"></th>'
+      + '</tr></thead><tbody>' + body + '</tbody></table>' };
+  }
+  function conditionsTable() {
+    const cols = displayCols('conditions');
+    const rows = sortRows(filteredConditions(), (r, k) => condVal(r, k));
+    const shown = rows.slice(0, state.limit);
+    const body = shown.map((r) => {
+      const { seg, sec } = r;
+      return '<tr data-detail="' + esc(sec.id) + '" data-seg="' + (seg.BEG_MP != null ? seg.BEG_MP : '') + '" style="border-bottom:1px solid #f2f5f8;cursor:pointer">'
+        + cols.map((k) => {
+          if (k === 'station') return '<td style="padding:5px 9px;font:12px \'IBM Plex Mono\',monospace;color:#5b6673;white-space:nowrap;text-align:right">'
+            + (seg.BEG_MP != null ? seg.BEG_MP.toFixed(2) : '?') + '–' + (seg.END_MP != null ? seg.END_MP.toFixed(2) : '?') + '</td>';
+          return cell(k, condVal(r, k));
+        }).join('')
+        + '<td style="padding:5px 9px" data-nodetail="1"><button data-goto="' + esc(sec.id) + '" title="Show on map" style="border:0;background:transparent;cursor:pointer;font-size:14px">🗺</button></td></tr>';
+    }).join('');
+    return { total: rows.length, shown: shown.length, html:
+      '<table style="width:100%;border-collapse:collapse;font:13px system-ui"><thead><tr>'
+      + cols.map((k) => th(k, meta(k).l)).join('')
+      + '<th style="position:sticky;top:0;background:#f7f9fb;border-bottom:1px solid #e3e8ee;width:30px"></th>'
+      + '</tr></thead><tbody>' + body + '</tbody></table>' };
+  }
+  function geometryTable() {
+    const rows = sortRows(filteredAssets(), (s, k) => k === 'ROUTE_IDENT' ? s.route_id : k === 'RTE_NAME' ? s.name : assetVal(s, k));
+    const shown = rows.slice(0, state.limit);
+    const body = shown.map((s) => {
+      const g = geomFacts(s), a = ripOf(s), isLot = s.type === 'area';
+      return '<tr data-detail="' + esc(s.id) + '" style="border-bottom:1px solid #f2f5f8;cursor:pointer">'
+        + '<td style="padding:5px 9px;font:700 12px \'IBM Plex Mono\',monospace;color:#0B3D66;white-space:nowrap">' + esc(s.route_id || '—') + '</td>'
+        + '<td style="padding:5px 9px;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.name) + '</td>'
+        + '<td style="padding:5px 9px;color:#5b6673">' + (isLot ? 'Lot' : 'Road') + '</td>'
+        + '<td style="padding:5px 9px;text-align:right;font-variant-numeric:tabular-nums">' + g.vtx + '</td>'
+        + '<td style="padding:5px 9px;text-align:right">' + (g.holes || '—') + '</td>'
+        + '<td style="padding:5px 9px;text-align:right;color:#3a4653">' + (g.lengthFt != null ? g.lengthFt.toFixed(0) + ' ft' : '—') + '</td>'
+        + '<td style="padding:5px 9px;text-align:right;color:#3a4653">' + (g.areaSf ? Number(g.areaSf).toLocaleString() + ' sf' : '—') + '</td>'
+        + '<td style="padding:5px 9px;text-align:right;font:12px \'IBM Plex Mono\',monospace;color:#5b6673;white-space:nowrap">'
+          + (a.BEG_MP_DCV != null ? a.BEG_MP_DCV.toFixed(2) + '–' + (a.END_MP_DCV != null ? a.END_MP_DCV.toFixed(2) : '?') : '—') + '</td>'
+        + '<td style="padding:5px 9px" data-nodetail="1"><button data-goto="' + esc(s.id) + '" title="Show on map" style="border:0;background:transparent;cursor:pointer;font-size:14px">🗺</button></td></tr>';
+    }).join('');
+    const H = (l, r) => '<th style="position:sticky;top:0;background:#f7f9fb;z-index:1;padding:7px 9px;border-bottom:1px solid #e3e8ee;text-align:' + (r ? 'right' : 'left') + ';font:700 11.5px system-ui;color:#12233b;white-space:nowrap">' + l + '</th>';
+    return { total: rows.length, shown: shown.length, html:
+      '<table style="width:100%;border-collapse:collapse;font:13px system-ui"><thead><tr>'
+      + H('Route ID') + H('Name') + H('Kind') + H('Vertices', 1) + H('Holes', 1) + H('Length', 1) + H('Area', 1) + H('MP range', 1)
+      + '<th style="position:sticky;top:0;background:#f7f9fb;border-bottom:1px solid #e3e8ee;width:30px"></th>'
+      + '</tr></thead><tbody>' + body + '</tbody></table>' };
+  }
+  function customTable() {
+    if (!state.custom.length) {
+      return { total: 0, shown: 0, html:
+        '<div style="padding:30px 22px;text-align:center;color:#5b6673">'
+        + '<div style="font-size:15px;font-weight:700;color:#12233b;margin-bottom:6px">No custom fields yet</div>'
+        + 'Add a column (e.g. “Field notes”, “Recommended treatment”) and it becomes editable per asset here, '
+        + 'travels in the saved project, and is included in the CSV export.<br><br>'
+        + '<button id="rip-cust-add" style="border:0;background:#1a73e8;color:#fff;border-radius:9px;padding:9px 16px;cursor:pointer;font-weight:700">+ Add custom field</button></div>' };
+    }
+    const rows = sortRows(filteredAssets(), (s, k) => k === 'ROUTE_IDENT' ? s.route_id : k === 'RTE_NAME' ? s.name : assetVal(s, k));
+    const shown = rows.slice(0, state.limit);
+    const body = shown.map((s) => {
+      const cv = s.rip_custom || {};
+      return '<tr style="border-bottom:1px solid #f2f5f8">'
+        + '<td style="padding:5px 9px;font:700 12px \'IBM Plex Mono\',monospace;color:#0B3D66;white-space:nowrap">' + esc(s.route_id || '—') + '</td>'
+        + '<td style="padding:5px 9px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(s.name) + '</td>'
+        + state.custom.map((c) => '<td style="padding:3px 6px"><input data-cust-val="' + esc(s.id) + '|' + esc(c.key)
+          + '" value="' + esc(cv[c.key] == null ? '' : cv[c.key]) + '" style="width:100%;min-width:120px;border:1px solid #e3e8ee;border-radius:6px;padding:5px 7px;font:12.5px inherit"></td>').join('')
+        + '</tr>';
+    }).join('');
+    return { total: rows.length, shown: shown.length, custom: true, html:
+      '<table style="width:100%;border-collapse:collapse;font:13px system-ui"><thead><tr>'
+      + '<th style="position:sticky;top:0;background:#f7f9fb;z-index:1;padding:7px 9px;border-bottom:1px solid #e3e8ee;text-align:left;font:700 11.5px system-ui">Route ID</th>'
+      + '<th style="position:sticky;top:0;background:#f7f9fb;z-index:1;padding:7px 9px;border-bottom:1px solid #e3e8ee;text-align:left;font:700 11.5px system-ui">Name</th>'
+      + state.custom.map((c) => '<th style="position:sticky;top:0;background:#f7f9fb;z-index:1;padding:7px 9px;border-bottom:1px solid #e3e8ee;text-align:left;font:700 11.5px system-ui;white-space:nowrap">'
+        + esc(c.label) + ' <button data-cust-del="' + esc(c.key) + '" title="Remove field" style="border:0;background:transparent;cursor:pointer;color:#c0392b;font-size:12px">✕</button></th>').join('')
+      + '</tr></thead><tbody>' + body + '</tbody></table>' };
+  }
+
+  // ---- detail drawer (every field, grouped) -----------------------------
+  function openDetail(sec, segMp) {
+    const old = $('rip-drawer'); if (old) old.remove();
+    const a = ripOf(sec), isLot = sec.type === 'area';
+    let seg = null;
+    if (segMp !== undefined && segMp !== '' && segMp != null) {
+      seg = (state.segsByRoute.get(sec.route_id) || []).find((x) => x.BEG_MP === Number(segMp));
+    }
+    // collect fields into groups
+    const buckets = {}; GROUPS.forEach((g) => buckets[g] = []);
+    const push = (k, v) => { if (v == null || v === '' || meta(k).syn) return; buckets[meta(k).g].push([meta(k).l, fmtVal(k, v)]); };
+    Object.keys(a).forEach((k) => push(k, a[k]));
+    if (sec.rip_custom) for (const c of state.custom) if (sec.rip_custom[c.key] != null && sec.rip_custom[c.key] !== '') buckets.Custom.push([c.label, sec.rip_custom[c.key]]);
+    const g = geomFacts(sec);
+    buckets.Location.push(['Vertices', g.vtx]);
+    if (g.lengthFt != null) buckets.Location.push(['Computed length', g.lengthFt.toFixed(0) + ' ft']);
+    if (g.holes) buckets.Location.push(['Holes', g.holes]);
+
+    const groupHtml = GROUPS.filter((gr) => buckets[gr].length).map((gr) =>
+      '<div style="margin-bottom:14px"><div style="font:700 11px system-ui;text-transform:uppercase;letter-spacing:.5px;color:#0B3D66;margin-bottom:5px">' + gr + '</div>'
+      + '<table style="width:100%;border-collapse:collapse;font:12.5px system-ui">'
+      + buckets[gr].map(([l, v]) => '<tr><td style="padding:3px 8px 3px 0;color:#8a949f;white-space:nowrap;vertical-align:top">' + esc(l)
+        + '</td><td style="padding:3px 0;color:#12233b;text-align:right;font-variant-numeric:tabular-nums">' + esc(v) + '</td></tr>').join('')
+      + '</table></div>').join('');
+
+    let segHtml = '';
+    if (seg) {
+      const segFields = ['BEG_MP', 'END_MP', 'INT_LENGTH', 'CONDITION_RATING', 'QR', 'PCR', 'SCR', 'RCI', 'IRI_AVG', 'RUT_AVG',
+        'SC_INDEX', 'AC_INDEX', 'LC_INDEX', 'TC_INDEX', 'PATCH_INDEX', 'SURF_TYPE', 'NO_LANES', 'LANE_WIDTH', 'SPEED', 'IMAGE_NAME', 'VIDEO'];
+      segHtml = '<div style="margin-bottom:14px;padding:10px 11px;background:#f4f8fc;border:1px solid #dbe6f2;border-radius:9px">'
+        + '<div style="font:700 11px system-ui;text-transform:uppercase;letter-spacing:.5px;color:#0B3D66;margin-bottom:5px">This 0.02 mi segment</div>'
+        + '<table style="width:100%;border-collapse:collapse;font:12.5px system-ui">'
+        + segFields.filter((k) => seg[k] != null).map((k) => '<tr><td style="padding:3px 8px 3px 0;color:#8a949f">' + esc(meta(k).l)
+          + '</td><td style="padding:3px 0;text-align:right">' + esc(fmtVal(k, seg[k])) + '</td></tr>').join('')
+        + '</table></div>';
+    }
+
+    const d = document.createElement('div');
+    d.id = 'rip-drawer';
+    d.style.cssText = 'position:fixed;top:0;right:0;bottom:0;width:min(400px,92vw);z-index:99997;background:#fff;'
+      + 'box-shadow:-8px 0 28px rgba(10,20,40,.22);display:flex;flex-direction:column;font-family:system-ui';
+    d.innerHTML =
+      '<div style="padding:14px 16px;border-bottom:1px solid #eef1f4;display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
+      + '<div><div style="font:700 13px \'IBM Plex Mono\',monospace;color:#0B3D66">' + esc(sec.route_id || '—') + '</div>'
+      + '<div style="font-size:15px;font-weight:800;color:#12233b;line-height:1.2">' + esc(sec.name) + '</div>'
+      + '<div style="font-size:12px;color:#8a949f;margin-top:2px">' + (isLot ? 'Parking lot' : 'Road') + ' · ' + esc(state.park) + (sec.in_scope ? ' · <b style="color:#0e7c66">in scope</b>' : ' · out of scope') + '</div></div>'
+      + '<button id="rip-drawer-x" style="border:0;background:#eef1f4;border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:15px">✕</button></div>'
+      + '<div style="overflow:auto;padding:14px 16px;flex:1">' + segHtml + groupHtml + '</div>'
+      + '<div style="padding:11px 16px;border-top:1px solid #eef1f4;display:flex;gap:8px">'
+      + '<button id="rip-drawer-map" style="flex:1;border:0;background:#1a73e8;color:#fff;border-radius:9px;padding:9px;cursor:pointer;font-weight:700">🗺 Show on map</button>'
+      + '<button id="rip-drawer-scope" style="border:1px solid #d3dae1;background:#fff;border-radius:9px;padding:9px 13px;cursor:pointer;font-weight:600;color:#12233b">' + (sec.in_scope ? 'Remove scope' : 'Set in scope') + '</button></div>';
+    document.body.appendChild(d);
+    $('rip-drawer-x').onclick = () => d.remove();
+    $('rip-drawer-map').onclick = () => { if (RW().showView) RW().showView('field', sec.id); if (window.showModule) window.showModule('map'); d.remove(); };
+    $('rip-drawer-scope').onclick = () => {
+      sec.in_scope = !sec.in_scope;
+      if (RW().persistSections) RW().persistSections();
+      if (RW().rerender) RW().rerender();
+      d.remove(); render();
+    };
+  }
+
+  // ---- column chooser ---------------------------------------------------
+  function colChooser(anchor) {
+    const old = $('rip-colmenu'); if (old) { old.remove(); return; }
+    const tab = state.tab, chosen = new Set(state.cols[tab] || []);
+    const menu = COL_MENU[tab] || [];
+    const byGroup = {}; GROUPS.forEach((g) => byGroup[g] = []);
+    menu.forEach((k) => byGroup[meta(k).g].push(k));
+    const r = anchor.getBoundingClientRect();
+    const m = document.createElement('div');
+    m.id = 'rip-colmenu';
+    m.style.cssText = 'position:fixed;top:' + (r.bottom + 5) + 'px;left:' + Math.max(8, r.right - 260) + 'px;z-index:99999;'
+      + 'background:#fff;border:1px solid #d3dae1;border-radius:10px;box-shadow:0 8px 26px rgba(20,35,60,.22);'
+      + 'width:260px;max-height:60vh;overflow:auto;padding:8px 0;font:13px system-ui';
+    m.innerHTML = GROUPS.filter((g) => byGroup[g].length).map((g) =>
+      '<div style="padding:5px 12px 2px;font:700 10.5px system-ui;text-transform:uppercase;letter-spacing:.5px;color:#8a949f">' + g + '</div>'
+      + byGroup[g].map((k) => '<label style="display:flex;align-items:center;gap:8px;padding:5px 12px;cursor:pointer">'
+        + '<input type="checkbox" data-col="' + k + '"' + (chosen.has(k) ? ' checked' : '') + '>' + esc(meta(k).l) + '</label>').join('')).join('');
+    document.body.appendChild(m);
+    m.querySelectorAll('[data-col]').forEach((cb) => cb.onchange = () => {
+      const k = cb.dataset.col, cur = state.cols[tab].filter((x) => x !== k);
+      if (cb.checked) {
+        // keep menu order so columns land in a sensible place
+        state.cols[tab] = menu.filter((mk) => mk === k || cur.includes(mk));
+      } else state.cols[tab] = cur;
+      save(); render();
+      // reopen so the user can keep toggling
+      const btn = $('rip-cols-btn'); if (btn) colChooser(btn);
+    });
+    setTimeout(() => document.addEventListener('click', function c(ev) {
+      if (!m.contains(ev.target) && ev.target.id !== 'rip-cols-btn') { m.remove(); document.removeEventListener('click', c); }
+    }), 0);
+  }
+
+  // ---- render -----------------------------------------------------------
+  const chip = (label, active, attrs) =>
+    '<button ' + attrs + ' style="border:1px solid ' + (active ? '#0B3D66' : '#d3dae1') + ';background:' + (active ? '#0B3D66' : '#fff')
+    + ';color:' + (active ? '#fff' : '#12233b') + ';border-radius:999px;padding:5px 12px;cursor:pointer;font:600 12.5px system-ui">' + esc(label) + '</button>';
+
   function facetOptions() {
-    const secs = ripSections();
-    const html = [];
+    const secs = ripSections(), html = [];
     for (const [field, label] of FACETS) {
       const vals = new Set();
-      for (const s of secs) {
-        const v = ripOf(s)[field];
-        if (v != null && v !== '') vals.add(String(v));
-      }
-      if (vals.size < 2) continue;                 // nothing to choose between
+      for (const s of secs) { const v = ripOf(s)[field]; if (v != null && v !== '') vals.add(String(v)); }
+      if (vals.size < 2) continue;
       const sel = state.facets[field] || '';
-      html.push(`<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#5b6673">
-        ${esc(label)}
-        <select data-facet="${field}" style="border:1px solid #d3dae1;border-radius:8px;padding:4px 7px;
-          font:12.5px 'IBM Plex Sans',system-ui;background:#fff;max-width:135px">
-          <option value=""${sel === '' ? ' selected' : ''}>All</option>
-          ${[...vals].sort().map((v) =>
-            `<option value="${esc(v)}"${sel === v ? ' selected' : ''}>${esc(v)}</option>`).join('')}
-        </select></label>`);
+      html.push('<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#5b6673">' + esc(label)
+        + '<select data-facet="' + field + '" style="border:1px solid #d3dae1;border-radius:8px;padding:4px 7px;font:12.5px system-ui;background:#fff;max-width:135px">'
+        + '<option value=""' + (sel === '' ? ' selected' : '') + '>All</option>'
+        + [...vals].sort().map((v) => '<option value="' + esc(v) + '"' + (sel === v ? ' selected' : '') + '>' + esc(v) + '</option>').join('')
+        + '</select></label>');
     }
     return html.join('');
   }
 
-  function metricCell(metric, v) {
-    if (v == null || v === '') return '<td style="color:#b8c0c8;text-align:right">—</td>';
-    const c = colorFor(metric, v);
-    return `<td style="text-align:right;font-variant-numeric:tabular-nums">
-      <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${c};margin-right:6px"></span>${esc(v)}</td>`;
-  }
-
-  function th(key, label, align) {
-    const on = state.sort.key === key;
-    return `<th data-sort="${key}" style="position:sticky;top:0;background:#f7f9fb;z-index:1;
-      text-align:${align || 'left'};padding:7px 9px;border-bottom:1px solid #e3e8ee;cursor:pointer;
-      font:700 11.5px 'IBM Plex Sans',system-ui;color:#12233b;white-space:nowrap">
-      ${esc(label)}${on ? (state.sort.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
-  }
-
-  function assetsTable() {
-    const rows = sortRows(filteredAssets(), (s, k) =>
-      k === 'ROUTE_IDENT' ? s.route_id : k === 'name' ? s.name
-      : k === 'kind' ? (s.type === 'area' ? 'Lot' : 'Road')
-      : k === 'size' ? (s.type === 'area' ? (ripOf(s).SQ_FEET || 0) : (ripOf(s).RTE_LENGTH || 0))
-      : ripOf(s)[k]);
-    const shown = rows.slice(0, state.limit);
-    const m = state.metric;
-    const body = shown.map((s) => {
-      const a = ripOf(s);
-      const isLot = s.type === 'area';
-      const size = isLot ? (a.SQ_FEET != null ? a.SQ_FEET.toLocaleString() + ' sf' : '—')
-                         : (a.RTE_LENGTH != null ? a.RTE_LENGTH.toFixed(3) + ' mi' : '—');
-      return `<tr data-id="${esc(s.id)}" style="border-bottom:1px solid #f2f5f8">
-        <td style="padding:5px 9px"><input type="checkbox" data-scope="${esc(s.id)}"${s.in_scope ? ' checked' : ''}></td>
-        <td style="padding:5px 9px;font:700 12px 'IBM Plex Mono',monospace;color:#0B3D66;white-space:nowrap">${esc(s.route_id || '—')}</td>
-        <td style="padding:5px 9px;max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.name)}</td>
-        <td style="padding:5px 9px;color:#5b6673">${isLot ? 'Lot' : 'Road'}</td>
-        <td style="padding:5px 9px;color:#5b6673">${esc(a.SURF_TYPE || '—')}</td>
-        <td style="padding:5px 9px;text-align:right;color:#5b6673;white-space:nowrap">${size}</td>
-        ${metricCell(m, a[m])}
-        <td style="padding:5px 9px;color:#5b6673">${esc(a.M_RATING || '—')}</td>
-        <td style="padding:5px 9px"><button data-goto="${esc(s.id)}" title="Show on map"
-          style="border:0;background:transparent;cursor:pointer;font-size:14px">🗺</button></td>
-      </tr>`;
-    }).join('');
-    return { total: rows.length, shown: shown.length, html:
-      `<table style="width:100%;border-collapse:collapse;font:13px 'IBM Plex Sans',system-ui">
-        <thead><tr>
-          <th style="position:sticky;top:0;background:#f7f9fb;z-index:1;padding:7px 9px;border-bottom:1px solid #e3e8ee;width:28px"></th>
-          ${th('ROUTE_IDENT', 'Route ID')}${th('name', 'Name')}${th('kind', 'Kind')}
-          ${th('SURF_TYPE', 'Surf')}${th('size', 'Size', 'right')}
-          ${th(state.metric, METRICS[state.metric].label, 'right')}${th('M_RATING', 'Rating')}
-          <th style="position:sticky;top:0;background:#f7f9fb;border-bottom:1px solid #e3e8ee;width:32px"></th>
-        </tr></thead><tbody>${body}</tbody></table>` };
-  }
-
-  function conditionsTable() {
-    const rows = sortRows(filteredConditions(), (r, k) =>
-      k === 'ROUTE_IDENT' ? r.seg.ROUTE_IDENT : k === 'name' ? r.sec.name
-      : k === 'station' ? (r.seg.BEG_MP || 0) : r.seg[k]);
-    const shown = rows.slice(0, state.limit);
-    const m = state.metric;
-    const extra = ['SC_INDEX', 'AC_INDEX', 'LC_INDEX', 'TC_INDEX', 'PATCH_INDEX']
-      .filter((k) => k !== m);
-    const body = shown.map(({ seg, sec }) => `
-      <tr data-id="${esc(sec.id)}" style="border-bottom:1px solid #f2f5f8">
-        <td style="padding:5px 9px;font:700 12px 'IBM Plex Mono',monospace;color:#0B3D66;white-space:nowrap">${esc(seg.ROUTE_IDENT)}</td>
-        <td style="padding:5px 9px;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(sec.name)}</td>
-        <td style="padding:5px 9px;font:12px 'IBM Plex Mono',monospace;color:#5b6673;white-space:nowrap">
-          ${(seg.BEG_MP != null ? seg.BEG_MP.toFixed(2) : '?')}–${(seg.END_MP != null ? seg.END_MP.toFixed(2) : '?')}</td>
-        ${metricCell(m, seg[m])}
-        ${extra.map((k) => `<td style="text-align:right;color:#5b6673;font-variant-numeric:tabular-nums">${seg[k] == null ? '—' : esc(seg[k])}</td>`).join('')}
-        <td style="padding:5px 9px;color:#5b6673">${esc(seg.QR || '—')}</td>
-        <td style="padding:5px 9px"><button data-goto="${esc(sec.id)}" title="Show on map"
-          style="border:0;background:transparent;cursor:pointer;font-size:14px">🗺</button></td>
-      </tr>`).join('');
-    return { total: rows.length, shown: shown.length, html:
-      `<table style="width:100%;border-collapse:collapse;font:13px 'IBM Plex Sans',system-ui">
-        <thead><tr>
-          ${th('ROUTE_IDENT', 'Route ID')}${th('name', 'Name')}${th('station', 'MP')}
-          ${th(m, METRICS[m].label, 'right')}
-          ${extra.map((k) => th(k, METRICS[k].label, 'right')).join('')}
-          ${th('QR', 'QR')}
-          <th style="position:sticky;top:0;background:#f7f9fb;border-bottom:1px solid #e3e8ee;width:32px"></th>
-        </tr></thead><tbody>${body}</tbody></table>` };
-  }
+  const TABS = [['assets', 'Assets'], ['conditions', 'Conditions'], ['geometry', 'Geometry'], ['custom', 'Custom']];
 
   function render() {
     const host = $('mod-rip'); if (!host) return;
-
     if (!state.bundle) {
-      host.innerHTML = `<div style="max-width:640px;margin:0 auto;padding:60px 20px;text-align:center;
-          font-family:'IBM Plex Sans',system-ui">
-          <div style="font-size:42px">🛣</div>
-          <div style="font-size:19px;font-weight:800;color:#12233b;margin-top:8px">No RIP park loaded</div>
-          <div style="color:#5b6673;margin:8px 0 18px;font-size:13.5px">
-            Import an NPS RIP Cycle 6 park to review its inventory and 0.02 mi condition data.</div>
-          <button id="rip-import-btn" style="border:0;background:#1a73e8;color:#fff;border-radius:10px;
-            padding:11px 20px;cursor:pointer;font-weight:700;font-size:14px">Import a park…</button>
-        </div>`;
-      const b = $('rip-import-btn');
-      if (b) b.onclick = () => window.RW2RIPImport && window.RW2RIPImport.show();
+      host.innerHTML = '<div style="max-width:640px;margin:0 auto;padding:60px 20px;text-align:center;font-family:system-ui">'
+        + '<div style="font-size:42px">🛣</div><div style="font-size:19px;font-weight:800;color:#12233b;margin-top:8px">No RIP park loaded</div>'
+        + '<div style="color:#5b6673;margin:8px 0 18px;font-size:13.5px">Import an NPS RIP Cycle 6 park to review its inventory and 0.02 mi condition data.</div>'
+        + '<button id="rip-import-btn" style="border:0;background:#1a73e8;color:#fff;border-radius:10px;padding:11px 20px;cursor:pointer;font-weight:700;font-size:14px">Import a park…</button></div>';
+      const b = $('rip-import-btn'); if (b) b.onclick = () => window.RW2RIPImport && window.RW2RIPImport.show();
       return;
     }
 
     const secs = ripSections();
     const inScope = secs.filter((s) => s.in_scope).length;
-    const tbl = state.tab === 'assets' ? assetsTable() : conditionsTable();
     const metrics = availableMetrics();
     if (!metrics.includes(state.metric)) state.metric = metrics[0] || 'PCR';
 
+    let tbl;
+    if (state.tab === 'conditions') tbl = conditionsTable();
+    else if (state.tab === 'geometry') tbl = geometryTable();
+    else if (state.tab === 'custom') tbl = customTable();
+    else tbl = assetsTable();
+
+    const showFilters = state.tab !== 'custom';
+    const unit = state.tab === 'conditions' ? 'segments' : 'routes';
+
     host.innerHTML =
-      `<div style="max-width:1180px;margin:0 auto;padding:16px 16px 40px;font-family:'IBM Plex Sans',system-ui">
+      '<div style="max-width:1240px;margin:0 auto;padding:16px 16px 40px;font-family:system-ui">'
 
-        <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:14px">
-          <div>
-            <div style="font-size:12px;color:#8a949f;text-transform:uppercase;letter-spacing:.6px">RIP Cycle ${esc(state.bundle.cycle)}</div>
-            <div style="font-size:24px;font-weight:800;color:#12233b;line-height:1.1">
-              ${esc(state.park)} <span style="font-size:14px;font-weight:600;color:#8a949f">${esc((state.bundle.states || []).join(', '))}</span></div>
-            <div style="font-size:13px;color:#5b6673;margin-top:3px">
-              ${secs.length} routes &amp; lots · ${state.segments.length.toLocaleString()} segments at 0.02 mi ·
-              <b style="color:#0e7c66">${inScope}</b> in scope</div>
-          </div>
-          <div style="display:flex;gap:8px">
-            <button id="rip-btn-import" style="border:1px solid #d3dae1;background:#fff;border-radius:9px;padding:8px 13px;cursor:pointer;font-weight:600;color:#12233b">Import park…</button>
-            <button id="rip-btn-map" style="border:0;background:#1a73e8;color:#fff;border-radius:9px;padding:8px 13px;cursor:pointer;font-weight:600">🗺 Map</button>
-          </div>
-        </div>
+      + '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:14px">'
+      + '<div><div style="font-size:12px;color:#8a949f;text-transform:uppercase;letter-spacing:.6px">RIP Cycle ' + esc(state.bundle.cycle) + '</div>'
+      + '<div style="font-size:24px;font-weight:800;color:#12233b;line-height:1.1">' + esc(state.park)
+      + ' <span style="font-size:14px;font-weight:600;color:#8a949f">' + esc((state.bundle.states || []).join(', ')) + '</span></div>'
+      + '<div style="font-size:13px;color:#5b6673;margin-top:3px">' + secs.length + ' routes &amp; lots · '
+      + state.segments.length.toLocaleString() + ' segments at 0.02 mi · <b style="color:#0e7c66">' + inScope + '</b> in scope</div></div>'
+      + '<div style="display:flex;gap:8px">'
+      + '<button id="rip-btn-import" style="border:1px solid #d3dae1;background:#fff;border-radius:9px;padding:8px 13px;cursor:pointer;font-weight:600;color:#12233b">Import park…</button>'
+      + '<button id="rip-btn-map" style="border:0;background:#1a73e8;color:#fff;border-radius:9px;padding:8px 13px;cursor:pointer;font-weight:600">🗺 Map</button></div></div>'
 
-        <div style="background:#fff;border:1px solid #e3e8ee;border-radius:12px;padding:11px 13px;margin-bottom:12px">
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-            <input id="rip-q" value="${esc(state.q)}" placeholder="Search route ID, name, FMSS…"
-              style="flex:1;min-width:180px;border:1px solid #d3dae1;border-radius:8px;padding:6px 10px;font:13px inherit">
-            ${chip('All', state.kind === 'all', 'data-kind="all"')}
-            ${chip('Roads', state.kind === 'road', 'data-kind="road"')}
-            ${chip('Lots', state.kind === 'lot', 'data-kind="lot"')}
-            <span style="width:1px;height:20px;background:#e3e8ee"></span>
-            ${chip('Any scope', state.scope === 'all', 'data-scope-f="all"')}
-            ${chip('In scope', state.scope === 'in', 'data-scope-f="in"')}
-            ${chip('Out', state.scope === 'out', 'data-scope-f="out"')}
-          </div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:9px">
-            ${facetOptions()}
-            <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#5b6673">
-              Metric
-              <select id="rip-metric" style="border:1px solid #d3dae1;border-radius:8px;padding:4px 7px;font:12.5px inherit;background:#fff">
-                ${metrics.map((k) => `<option value="${k}"${k === state.metric ? ' selected' : ''}>${esc(METRICS[k].label)}</option>`).join('')}
-              </select></label>
-            <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#5b6673">
-              between <input id="rip-min" value="${esc(state.range.min)}" placeholder="min" style="width:56px;border:1px solid #d3dae1;border-radius:7px;padding:4px 6px;font:12.5px inherit">
-              and <input id="rip-max" value="${esc(state.range.max)}" placeholder="max" style="width:56px;border:1px solid #d3dae1;border-radius:7px;padding:4px 6px;font:12.5px inherit"></label>
-            <button id="rip-clear" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12.5px inherit;color:#5b6673">Clear</button>
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:9px;padding-top:9px;border-top:1px solid #f2f5f8">
-            <span style="font-size:12px;color:#5b6673">Filtered <b>${tbl.total.toLocaleString()}</b> ${state.tab === 'assets' ? 'routes' : 'segments'} —</span>
-            <button id="rip-scope-in" style="border:0;background:#0e7c66;color:#fff;border-radius:8px;padding:6px 12px;cursor:pointer;font:600 12.5px inherit">Set in scope</button>
-            <button id="rip-scope-out" style="border:1px solid #d3dae1;background:#fff;color:#12233b;border-radius:8px;padding:6px 12px;cursor:pointer;font:600 12.5px inherit">Set out of scope</button>
-            ${state.tab === 'conditions' ? '<span style="font-size:11.5px;color:#8a949f">(applies to the routes behind these segments)</span>' : ''}
-          </div>
-        </div>
+      + (showFilters ?
+        '<div style="background:#fff;border:1px solid #e3e8ee;border-radius:12px;padding:11px 13px;margin-bottom:12px">'
+        + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+        + '<input id="rip-q" value="' + esc(state.q) + '" placeholder="Search route ID, name, FMSS…" style="flex:1;min-width:180px;border:1px solid #d3dae1;border-radius:8px;padding:6px 10px;font:13px system-ui">'
+        + chip('All', state.kind === 'all', 'data-kind="all"') + chip('Roads', state.kind === 'road', 'data-kind="road"') + chip('Lots', state.kind === 'lot', 'data-kind="lot"')
+        + '<span style="width:1px;height:20px;background:#e3e8ee"></span>'
+        + chip('Any scope', state.scope === 'all', 'data-scope-f="all"') + chip('In scope', state.scope === 'in', 'data-scope-f="in"') + chip('Out', state.scope === 'out', 'data-scope-f="out"')
+        + '</div>'
+        + '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:9px">'
+        + facetOptions()
+        + '<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#5b6673">Metric<select id="rip-metric" style="border:1px solid #d3dae1;border-radius:8px;padding:4px 7px;font:12.5px system-ui;background:#fff">'
+        + metrics.map((k) => '<option value="' + k + '"' + (k === state.metric ? ' selected' : '') + '>' + esc(meta(k).l) + '</option>').join('') + '</select></label>'
+        + '<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#5b6673">between <input id="rip-min" value="' + esc(state.range.min) + '" placeholder="min" style="width:56px;border:1px solid #d3dae1;border-radius:7px;padding:4px 6px;font:12.5px system-ui"> and <input id="rip-max" value="' + esc(state.range.max) + '" placeholder="max" style="width:56px;border:1px solid #d3dae1;border-radius:7px;padding:4px 6px;font:12.5px system-ui"></label>'
+        + '<button id="rip-clear" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12.5px system-ui;color:#5b6673">Clear</button></div>'
+        + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:9px;padding-top:9px;border-top:1px solid #f2f5f8">'
+        + '<span style="font-size:12px;color:#5b6673">Filtered <b>' + tbl.total.toLocaleString() + '</b> ' + unit + ' —</span>'
+        + '<button id="rip-scope-in" style="border:0;background:#0e7c66;color:#fff;border-radius:8px;padding:6px 12px;cursor:pointer;font:600 12.5px system-ui">Set in scope</button>'
+        + '<button id="rip-scope-out" style="border:1px solid #d3dae1;background:#fff;color:#12233b;border-radius:8px;padding:6px 12px;cursor:pointer;font:600 12.5px system-ui">Set out of scope</button>'
+        + (state.tab === 'conditions' ? '<span style="font-size:11.5px;color:#8a949f">(applies to the routes behind these segments)</span>' : '')
+        + '</div></div>'
+        : '')
 
-        <div style="display:flex;gap:6px;margin-bottom:0">
-          ${['assets', 'conditions'].map((t) => `<button data-tab="${t}"
-            style="border:1px solid #e3e8ee;border-bottom:${state.tab === t ? '1px solid #fff' : '1px solid #e3e8ee'};
-            background:${state.tab === t ? '#fff' : '#eef1f4'};color:#12233b;border-radius:10px 10px 0 0;
-            padding:8px 16px;cursor:pointer;font:700 13px inherit;position:relative;top:1px">
-            ${t === 'assets' ? 'Assets' : 'Conditions'}</button>`).join('')}
-        </div>
+      + '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:8px">'
+      + '<div style="display:flex;gap:6px">' + TABS.map(([t, l]) =>
+        '<button data-tab="' + t + '" style="border:1px solid #e3e8ee;border-bottom:1px solid ' + (state.tab === t ? '#fff' : '#e3e8ee') + ';background:'
+        + (state.tab === t ? '#fff' : '#eef1f4') + ';color:#12233b;border-radius:10px 10px 0 0;padding:8px 15px;cursor:pointer;font:700 13px system-ui;position:relative;top:1px">' + l + '</button>').join('') + '</div>'
+      + '<div style="display:flex;gap:6px;padding-bottom:5px">'
+      + (state.tab === 'custom' ? '<button id="rip-cust-add" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">+ Field</button>' : '')
+      + ((state.tab === 'assets' || state.tab === 'conditions') ? '<button id="rip-cols-btn" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">Columns ▾</button>' : '')
+      + (state.tab !== 'custom' ? '<button id="rip-csv" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">⬇ CSV</button>' : '')
+      + '</div></div>'
 
-        <div style="background:#fff;border:1px solid #e3e8ee;border-radius:0 12px 12px 12px;overflow:hidden">
-          <div style="max-height:60vh;overflow:auto">${tbl.html}</div>
-          <div style="padding:9px 13px;border-top:1px solid #eef1f4;display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:#5b6673">
-            <span>Showing <b>${tbl.shown.toLocaleString()}</b> of <b>${tbl.total.toLocaleString()}</b></span>
-            ${tbl.shown < tbl.total ? '<button id="rip-more" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 13px;cursor:pointer;font:600 12.5px inherit;color:#12233b">Show ' + Math.min(PAGE, tbl.total - tbl.shown) + ' more</button>' : '<span style="color:#b8c0c8">end of list</span>'}
-          </div>
-        </div>
-      </div>`;
+      + '<div style="background:#fff;border:1px solid #e3e8ee;border-radius:0 12px 12px 12px;overflow:hidden">'
+      + '<div style="max-height:60vh;overflow:auto">' + tbl.html + '</div>'
+      + (tbl.total !== undefined ?
+        '<div style="padding:9px 13px;border-top:1px solid #eef1f4;display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:#5b6673">'
+        + '<span>Showing <b>' + tbl.shown.toLocaleString() + '</b> of <b>' + tbl.total.toLocaleString() + '</b></span>'
+        + (tbl.shown < tbl.total ? '<button id="rip-more" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 13px;cursor:pointer;font:600 12.5px system-ui;color:#12233b">Show ' + Math.min(PAGE, tbl.total - tbl.shown) + ' more</button>' : '<span style="color:#b8c0c8">end of list</span>')
+        + '</div>' : '')
+      + '</div></div>';
 
     wire(host);
   }
 
+  // ---- wiring -----------------------------------------------------------
   function wire(host) {
-    const rerender = () => render();
-    const set = (fn) => { fn(); state.limit = PAGE; rerender(); };
-
+    const set = (fn) => { fn(); state.limit = PAGE; render(); };
     const q = $('rip-q');
-    if (q) q.oninput = (e) => {
-      state.q = e.target.value; state.limit = PAGE;
-      const at = e.target.selectionStart; render();
-      const nq = $('rip-q'); if (nq) { nq.focus(); nq.setSelectionRange(at, at); }
-    };
+    if (q) q.oninput = (e) => { state.q = e.target.value; state.limit = PAGE; const at = e.target.selectionStart; render(); const n = $('rip-q'); if (n) { n.focus(); n.setSelectionRange(at, at); } };
     host.querySelectorAll('[data-kind]').forEach((b) => b.onclick = () => set(() => { state.kind = b.dataset.kind; }));
     host.querySelectorAll('[data-scope-f]').forEach((b) => b.onclick = () => set(() => { state.scope = b.dataset.scopeF; }));
     host.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => set(() => { state.tab = b.dataset.tab; }));
     host.querySelectorAll('[data-facet]').forEach((s) => s.onchange = () => set(() => { state.facets[s.dataset.facet] = s.value; }));
     host.querySelectorAll('[data-sort]').forEach((h) => h.onclick = () => set(() => {
-      const k = h.dataset.sort;
-      if (state.sort.key === k) state.sort.dir *= -1; else state.sort = { key: k, dir: 1 };
+      const k = h.dataset.sort; if (state.sort.key === k) state.sort.dir *= -1; else state.sort = { key: k, dir: 1 };
     }));
-
     const met = $('rip-metric'); if (met) met.onchange = () => set(() => { state.metric = met.value; });
     const mn = $('rip-min'); if (mn) mn.onchange = () => set(() => { state.range.min = mn.value.trim(); });
     const mx = $('rip-max'); if (mx) mx.onchange = () => set(() => { state.range.max = mx.value.trim(); });
-    const clr = $('rip-clear'); if (clr) clr.onclick = () => set(() => {
-      state.q = ''; state.kind = 'all'; state.scope = 'all';
-      state.facets = {}; state.range = { min: '', max: '' };
-    });
+    const clr = $('rip-clear'); if (clr) clr.onclick = () => set(() => { state.q = ''; state.kind = 'all'; state.scope = 'all'; state.facets = {}; state.range = { min: '', max: '' }; });
     const more = $('rip-more'); if (more) more.onclick = () => { state.limit += PAGE; render(); };
-
     const si = $('rip-scope-in'); if (si) si.onclick = () => setFilteredScope(true);
     const so = $('rip-scope-out'); if (so) so.onclick = () => setFilteredScope(false);
     const imp = $('rip-btn-import'); if (imp) imp.onclick = () => window.RW2RIPImport && window.RW2RIPImport.show();
     const mp = $('rip-btn-map'); if (mp) mp.onclick = () => { if (RW().openMap) RW().openMap(); else if (window.showModule) window.showModule('map'); };
+    const cols = $('rip-cols-btn'); if (cols) cols.onclick = () => colChooser(cols);
+    const csv = $('rip-csv'); if (csv) csv.onclick = exportCSV;
+    const add = $('rip-cust-add'); if (add) add.onclick = addCustomField;
 
-    host.querySelectorAll('[data-scope]').forEach((cb) => cb.onchange = () => {
-      const sec = sections().find((s) => s.id === cb.dataset.scope);
-      if (!sec) return;
+    host.querySelectorAll('[data-scope]').forEach((cb) => cb.onchange = (e) => {
+      e.stopPropagation();
+      const sec = sections().find((s) => s.id === cb.dataset.scope); if (!sec) return;
       sec.in_scope = cb.checked;
       if (RW().persistSections) RW().persistSections();
       if (RW().rerender) RW().rerender();
@@ -499,10 +707,39 @@
     });
     host.querySelectorAll('[data-goto]').forEach((b) => b.onclick = (e) => {
       e.stopPropagation();
-      const id = b.dataset.goto;
-      if (RW().showView) RW().showView('field', id);
+      if (RW().showView) RW().showView('field', b.dataset.goto);
       if (window.showModule) window.showModule('map');
     });
+    host.querySelectorAll('[data-detail]').forEach((tr) => tr.onclick = (e) => {
+      if (e.target.closest('[data-nodetail]') || e.target.tagName === 'INPUT') return;
+      const sec = sections().find((s) => s.id === tr.dataset.detail);
+      if (sec) openDetail(sec, tr.dataset.seg);
+    });
+    // custom-field editing
+    host.querySelectorAll('[data-cust-val]').forEach((inp) => inp.onchange = () => {
+      const [id, key] = inp.dataset.custVal.split('|');
+      const sec = sections().find((s) => s.id === id); if (!sec) return;
+      if (!sec.rip_custom) sec.rip_custom = {};
+      if (inp.value.trim() === '') delete sec.rip_custom[key]; else sec.rip_custom[key] = inp.value;
+      if (RW().persistSections) RW().persistSections();
+    });
+    host.querySelectorAll('[data-cust-del]').forEach((b) => b.onclick = () => {
+      const key = b.dataset.custDel;
+      if (!confirm('Remove custom field “' + (state.custom.find((c) => c.key === key) || {}).label + '”? Values already entered are cleared.')) return;
+      state.custom = state.custom.filter((c) => c.key !== key);
+      sections().forEach((s) => { if (s.rip_custom) delete s.rip_custom[key]; });
+      save(); if (RW().persistSections) RW().persistSections(); render();
+    });
+  }
+
+  function addCustomField() {
+    const label = prompt('New custom field name (becomes a column + CSV header):', '');
+    if (label === null) return;
+    const clean = label.trim(); if (!clean) return;
+    const key = clean.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || ('f' + state.custom.length);
+    if (state.custom.some((c) => c.key === key)) { alert('A field with that name already exists.'); return; }
+    state.custom.push({ key, label: clean });
+    save(); render();
   }
 
   // ---- boot -------------------------------------------------------------
@@ -514,9 +751,8 @@
   window.RW2RIP = {
     state, attach, render, save,
     show: () => { if (window.showModule) window.showModule('rip'); render(); },
-    segmentsFor: (routeIdent) => state.segsByRoute.get(routeIdent) || [],
+    segmentsFor: (rid) => state.segsByRoute.get(rid) || [],
     colorFor, norm, METRICS, LOT_METRICS,
-    metric: () => state.metric,
-    hasPark: () => !!state.bundle,
+    metric: () => state.metric, hasPark: () => !!state.bundle,
   };
 })();

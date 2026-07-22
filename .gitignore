@@ -8,16 +8,15 @@ data/_rip/*
 !data/_rip/route_ids.json
 !data/_rip/scope.json
 
-# NPS RIP Cycle 6 per-park bundles (tools/nps_rip_slice.py). This is public
-# government data, so sample parks ship with the app and File > RIP Cycle 6
-# can import them straight from the deployed site. Slicing all 309 parks is
-# ~200 MB, so keep the full set local and commit only what's worth shipping.
+# NPS RIP Cycle 6 per-park bundles (tools/nps_rip_slice.py). Public government
+# data, so all 342 parks ship with the app and import straight from the
+# deployed site. Committed GZIPPED (277 MB raw -> 49 MB gz) and decompressed in
+# the browser via DecompressionStream. The raw .json stay local (regenerate
+# with tools/nps_rip_slice.py) so git only tracks the .gz + index.
 !data/rip/
 data/rip/*
 !data/rip/parks_index.json
-!data/rip/NPS_C6_MORR.json
-!data/rip/NPS_C6_SHEN.json
-!data/rip/NPS_C6_GRSM.json
+!data/rip/*.json.gz
 
 # --- Reference material (large; donor RoadWalk source + stashed skeleton) ---
 reference/

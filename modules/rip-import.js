@@ -133,12 +133,25 @@
     return { sections: S.length, segments: segs, skipped };
   }
 
+  // Bundles ship gzipped (49 MB vs 277 MB). Browsers decompress gzip natively
+  // via DecompressionStream, so fetch the .gz and inflate; fall back to a plain
+  // .json for a locally-sliced park that wasn't gzipped.
+  async function fetchBundle(file) {
+    if (typeof DecompressionStream === 'function') {
+      const gz = await fetch(BUNDLE_DIR + file + '.gz', { cache: 'no-cache' });
+      if (gz.ok) {
+        const stream = gz.body.pipeThrough(new DecompressionStream('gzip'));
+        return JSON.parse(await new Response(stream).text());
+      }
+    }
+    const res = await fetch(BUNDLE_DIR + file, { cache: 'no-cache' });
+    if (!res.ok) throw new Error('could not fetch ' + file + ' (' + res.status + ')');
+    return res.json();
+  }
+
   async function importPark(entry) {
-    const url = BUNDLE_DIR + entry.file;
     toast('Loading ' + entry.park + '…');
-    const res = await fetch(url, { cache: 'no-cache' });
-    if (!res.ok) throw new Error('could not fetch ' + entry.file + ' (' + res.status + ')');
-    return applyBundleToProject(await res.json());
+    return applyBundleToProject(await fetchBundle(entry.file));
   }
 
   // ---- park picker ------------------------------------------------------
@@ -210,7 +223,8 @@
       }
       list.innerHTML = rows.map((p) => {
         const c = p.counts || {};
-        const mb = p.bytes ? (p.bytes / 1048576).toFixed(1) + ' MB' : '';
+        const dl = p.gz_bytes || p.bytes;
+        const mb = dl ? (dl / 1048576).toFixed(dl < 1048576 ? 2 : 1) + ' MB' : '';
         return `<button class="rip-pick-row" data-park="${esc(p.park)}"
             style="display:flex;width:100%;gap:12px;align-items:center;text-align:left;border:0;
                    background:#fff;padding:11px 18px;cursor:pointer;border-bottom:1px solid #f2f5f8">
