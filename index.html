@@ -101,6 +101,8 @@
 <script src="modules/library.js" defer></script>
 <script src="modules/route-tools.js" defer></script>
 <script src="modules/aecom-toggle.js?v=2" defer></script>
+<script src="modules/rip-data.js?v=1" defer></script>
+<script src="modules/rip-import.js?v=1" defer></script>
 <script src="modules/scope-assign.js?v=5" defer></script>
 <script src="modules/sections-table.js" defer></script>
 <script src="modules/route-menu.js?v=7" defer></script>
@@ -9129,6 +9131,9 @@ body.mobile-mode #app {
       <button class="app-tab" data-module="data" role="tab" aria-selected="false"
               title="Data entry &amp; table">
         <span class="app-tab-icon">📋</span><span class="app-tab-label">Data</span></button>
+      <button class="app-tab" data-module="rip" role="tab" aria-selected="false"
+              title="RIP — NPS Cycle 6 inventory &amp; 0.02 mi condition review">
+        <span class="app-tab-icon">🛣</span><span class="app-tab-label">RIP</span></button>
       <button class="app-tab" data-module="triage" role="tab" aria-selected="false"
               title="Photo triage — tag photos to assets &amp; drop pins">
         <span class="app-tab-icon">📷</span><span class="app-tab-label">Triage</span></button>
@@ -9235,6 +9240,13 @@ body.mobile-mode #app {
          Contents rendered + wired by modules/file-hub.js.
          ============================================================ -->
     <div id="mod-file" class="module-view" style="overflow:auto;background:var(--paper-2,#f4f6f9)"></div>
+
+    <!-- ============================================================
+         MODULE: RIP  (NPS RIP Cycle 6 inventory + 0.02 mi conditions)
+         Contents rendered + wired by modules/rip-data.js; parks are
+         imported by modules/rip-import.js.
+         ============================================================ -->
+    <div id="mod-rip" class="module-view" style="overflow:auto;background:var(--paper-2,#f4f6f9)"></div>
 
     <!-- ============================================================
          MODULE: MAP  (default active — matches existing behaviour)
@@ -29121,7 +29133,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
 
   function showModule(name) {
     // Guard: ignore unknown module names
-    const VALID = ['file', 'map', 'dashboard', 'data', 'safety', 'log', 'settings', 'project', 'triage', 'tracks'];
+    const VALID = ['file', 'map', 'dashboard', 'data', 'safety', 'log', 'settings', 'project', 'triage', 'tracks', 'rip'];
     if (!VALID.includes(name)) {
       console.warn('[RoadWalk] showModule: unknown module "' + name + '"');
       return;

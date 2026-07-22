@@ -80,6 +80,14 @@
       if (RW().setProjectName) RW().setProjectName(name.trim() || cur);
       render(); click('dash-export-btn');
     },
+    ripImport() {
+      if (window.RW2RIPImport) window.RW2RIPImport.show();
+      else toast('RIP import module not ready', true);
+    },
+    ripTable() {
+      if (window.RW2RIP) window.RW2RIP.show();
+      else toast('RIP module not ready', true);
+    },
     importPark() {
       const anchor = $('fh-tile-importPark');
       if (window.RW2ImportChooser && anchor) window.RW2ImportChooser(anchor);
@@ -154,6 +162,7 @@
       ].join(''))}
 
          ${group('Build project', [
+        tile('ripImport', '🛣️', 'RIP Cycle 6', 'NPS park → routes, lots & 0.02 mi data'),
         tile('importPark', '🗺️', 'Import Shapes', 'Shapefiles / KMZ → routes & lots'),
         tile('newRoute', '✏️', 'New Route', 'Draw a road or lot on the map'),
         tile('scopePins', '📍', 'Scope Pins', 'KMZ pins → Route IDs + in-scope'),
@@ -163,6 +172,7 @@
         tile('scopeData', '📋', 'Scope Data', 'Field Survey XLSX in / out'),
         tile('geojson', '🌐', 'GeoJSON', 'Shapes in / out (AECOM)'),
         tile('table', '📑', 'Route Table', 'All routes · in-scope toggle'),
+        tile('ripTable', '🛣️', 'RIP Review', 'Assets & 0.02 mi conditions · filters'),
         tile('photos', '📷', 'Photos', 'Export field photos'),
       ].join(''))}
 
