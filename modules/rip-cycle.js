@@ -30,9 +30,22 @@
     if (!s || s === 'NOT APPLICABLE' || s === 'NOT RATED' || s === 'NA' || s === 'N/A') return null;
     const n = Number(v); return isNaN(n) ? null : n;
   }
+  // Esri polyline geometry → the same flat [lng,lat,...] parts Cycle 6 uses,
+  // so either cycle's linework can drive the map bands interchangeably.
+  function toG(geom) {
+    if (!geom || !geom.paths || !geom.paths.length) return null;
+    const out = [];
+    for (const path of geom.paths) {
+      const flat = [];
+      for (const p of path) { flat.push(p[0], p[1]); }
+      if (flat.length >= 4) out.push(flat);
+    }
+    return out.length ? out : null;
+  }
   // Cycle 7 attributes → Cycle 6 metric names (feet for INT_LENGTH, like C6).
-  function mapC7(a) {
+  function mapC7(a, geom) {
     return {
+      _g: toG(geom),
       ROUTE_IDENT: a.ROUTE_IDENT, BEG_MP: a.BEG_MP, END_MP: a.END_MP,
       INT_LENGTH: (a.END_MP != null && a.BEG_MP != null) ? (a.END_MP - a.BEG_MP) * 5280 : 105.6,
       PCR: num(a.PAVED_RATING), SCR: num(a.DCV_SCR), RCI: num(a.DCV_RCI),
@@ -99,13 +112,16 @@
   async function fetchAll(park) {
     const all = [];
     for (let off = 0; off < 300000;) {
+      // Geometry is pulled too: Cycle 7 is the most recent linework, so the map
+      // prefers it over the Cycle 6 geodatabase geometry where it exists.
       const p = new URLSearchParams({
         where: "UNIT_ID='" + park + "'", outFields: OUT, orderByFields: 'ROUTE_IDENT,BEG_MP',
-        resultRecordCount: String(PAGE), resultOffset: String(off), returnGeometry: 'false', f: 'json',
+        resultRecordCount: String(PAGE), resultOffset: String(off),
+        returnGeometry: 'true', outSR: '4326', f: 'json',
       });
       const j = await (await fetch(FS + '?' + p)).json();
       if (j.error) throw new Error(j.error.message || 'query failed');
-      const fs = (j.features || []).map((f) => mapC7(f.attributes));
+      const fs = (j.features || []).map((f) => mapC7(f.attributes, f.geometry));
       all.push(...fs);
       if (fs.length < PAGE && !j.exceededTransferLimit) break;
       if (!fs.length) break;
@@ -177,6 +193,7 @@
   window.RW2RIPCycle = {
     loadPark, get: () => state, segmentsFor: (r) => state.byRoute.get(r) || [],
     matchSeg, coverage, hasData: () => state.all.length > 0,
+    hasGeometry: () => state.all.some((s) => s._g),
     matchLot: (r) => state.parking.get(r) || null,
     parkingCount: () => state.parking.size,
     park: () => state.park, fetchedAt: () => state.fetchedAt,

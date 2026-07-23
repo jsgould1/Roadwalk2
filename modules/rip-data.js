@@ -375,7 +375,8 @@
     } else if (state.tab === 'analysis') {
       const m = state.analMetric;
       header = ['Route ID', 'Name', 'Begin MP', 'End MP', 'C6 ' + meta(m).l, 'C7 ' + meta(m).l, 'Delta', 'Resolution'];
-      rows = analysisRows().map((r) => [r.sec.route_id, r.sec.name, r.begMp.toFixed(3), r.endMp.toFixed(3), r.c6, r.c7, r.d, state.analRes + ' mi']);
+      const unitLbl = state.analRes === 'route' ? 'whole route' : state.analRes + ' mi';
+      rows = analysisRows().map((r) => [r.sec.route_id, r.sec.name, r.begMp.toFixed(3), r.endMp.toFixed(3), r.c6, r.c7, r.d, unitLbl]);
     } else { return; }
     const csv = [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
     download('RIP_' + park + '_' + state.tab + '.csv', csv);
@@ -734,6 +735,17 @@
   // 0.02 mi = one per segment; 0.1 mi = length-weighted mean of ~5 segments.
   // `key` is the shared bin index so Cycle 6 and Cycle 7 units line up.
   function unitsFor(segs, res, metric) {
+    // 'route' = the highest level: one length-weighted figure for the whole route.
+    if (res === 'route') {
+      let sum = 0, w = 0, lo = Infinity, hi = -Infinity;
+      for (const s of segs) {
+        if (s.BEG_MP != null) lo = Math.min(lo, s.BEG_MP);
+        if (s.END_MP != null) hi = Math.max(hi, s.END_MP);
+        if (s[metric] != null) { const len = s.INT_LENGTH || 105.6; sum += s[metric] * len; w += len; }
+      }
+      if (!isFinite(lo)) return [];
+      return [{ begMp: lo, endMp: isFinite(hi) ? hi : lo, v: w ? sum / w : null, key: 0 }];
+    }
     if (res === 0.1) {
       const bins = new Map();
       for (const s of segs) {
@@ -827,7 +839,9 @@
     const dcell = (v, isDelta) => {
       if (v == null) return '<td style="padding:5px 9px;text-align:right;color:#c3cad2">—</td>';
       const bg = isDelta ? deltaColor(v) : cellColor(metric, v);
-      const txt = isDelta ? ((v > 0 ? '+' : '') + v.toFixed(res === 0.1 ? 1 : 0)) : (res === 0.1 ? Number(v).toFixed(1) : v);
+      // 0.02 mi is a raw segment value (integer); route and 0.1 mi are means.
+      const dec = res !== 0.02;
+      const txt = isDelta ? ((v > 0 ? '+' : '') + v.toFixed(dec ? 1 : 0)) : (dec ? Number(v).toFixed(1) : v);
       if (isDelta) return '<td style="padding:5px 9px;text-align:right;font-variant-numeric:tabular-nums"><span style="display:inline-block;min-width:34px;text-align:center;background:' + bg + ';color:#12233b;border-radius:5px;padding:1px 6px;font-weight:700">' + txt + '</span></td>';
       return '<td style="padding:5px 9px;text-align:right;font-variant-numeric:tabular-nums"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:' + (bg || '#c3cad2') + ';margin-right:6px;vertical-align:middle"></span>' + esc(txt) + '</td>';
     };
@@ -938,9 +952,14 @@
       + (state.tab === 'analysis' ? '<span style="font-size:12px;color:#8a949f">Metric</span>'
           + '<select id="rip-anal-metric" style="border:1px solid #d3dae1;border-radius:8px;padding:4px 7px;font:12.5px system-ui;background:#fff">'
           + CYCLE_METRICS.map((k) => '<option value="' + k + '"' + (k === state.analMetric ? ' selected' : '') + '>' + esc(meta(k).l) + '</option>').join('') + '</select>'
-          + '<span style="font-size:12px;color:#8a949f;margin-left:4px">Every</span>'
-          + '<button data-anal-res="0.1" style="border:1px solid ' + (state.analRes === 0.1 ? '#0B3D66' : '#cfd6dd') + ';background:' + (state.analRes === 0.1 ? '#0B3D66' : '#fff') + ';color:' + (state.analRes === 0.1 ? '#fff' : '#33414f') + ';padding:4px 9px;border-radius:7px;cursor:pointer;font:600 11.5px system-ui">0.1 mi</button>'
-          + '<button data-anal-res="0.02" style="border:1px solid ' + (state.analRes === 0.02 ? '#0B3D66' : '#cfd6dd') + ';background:' + (state.analRes === 0.02 ? '#0B3D66' : '#fff') + ';color:' + (state.analRes === 0.02 ? '#fff' : '#33414f') + ';padding:4px 9px;border-radius:7px;cursor:pointer;font:600 11.5px system-ui">0.02 mi</button>' : '')
+          + '<span style="font-size:12px;color:#8a949f;margin-left:4px">By</span>'
+          + ['route', 0.1, 0.02].map((r) => {
+            const on = state.analRes === r;
+            return '<button data-anal-res="' + r + '" style="border:1px solid ' + (on ? '#0B3D66' : '#cfd6dd')
+              + ';background:' + (on ? '#0B3D66' : '#fff') + ';color:' + (on ? '#fff' : '#33414f')
+              + ';padding:4px 9px;border-radius:7px;cursor:pointer;font:600 11.5px system-ui">'
+              + (r === 'route' ? 'Route' : r + ' mi') + '</button>';
+          }).join('') : '')
       + (state.tab === 'conditions' ? '<button id="rip-expand-all" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">Expand all</button>'
           + '<button id="rip-collapse-all" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">Collapse all</button>' : '')
       + (state.tab === 'custom' ? '<button id="rip-cust-add" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">+ Field</button>' : '')
@@ -997,7 +1016,10 @@
     if (cyR) cyR.onclick = () => { if (window.RW2RIPCycle) window.RW2RIPCycle.loadPark(state.park, { refresh: true, onchange: () => render() }); render(); };
     // analysis controls
     const am = $('rip-anal-metric'); if (am) am.onchange = () => set(() => { state.analMetric = am.value; });
-    host.querySelectorAll('[data-anal-res]').forEach((b) => b.onclick = () => set(() => { state.analRes = Number(b.dataset.analRes); }));
+    host.querySelectorAll('[data-anal-res]').forEach((b) => b.onclick = () => set(() => {
+      const r = b.dataset.analRes;
+      state.analRes = r === 'route' ? 'route' : Number(r);
+    }));
     host.querySelectorAll('[data-asort]').forEach((h) => h.onclick = () => set(() => {
       const k = h.dataset.asort; if (state.sort.key === k) state.sort.dir *= -1; else state.sort = { key: k, dir: 1 };
     }));

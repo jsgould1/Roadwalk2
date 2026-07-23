@@ -32,6 +32,7 @@
   // sit on top of and dull the colour, but below markerPane (600) so route
   // labels stay readable over them.
   const PANE_Z = 450;
+  const NO_DATA_FILL = '#c3c8cd';   // lots with no rating for the chosen cycle
 
   // Metrics offered. `k` is the Cycle 6 field name; Cycle 7 is mapped to the
   // same keys by rip-cycle.js. Parking only has PCR.
@@ -87,11 +88,25 @@
 
   // ---- values -----------------------------------------------------------
   const c7Ready = () => CYC() && CYC().hasData() && CYC().park() === (RIP() && RIP().state.park);
-  function segValues(routeIdent, begMp, c6seg, metricKey) {
+
+  // Both cycles are keyed by route + 0.02 mi milepost bin, so a value can be
+  // looked up per cycle regardless of which cycle's geometry drew the band.
+  const mpKey = (rid, mp) => rid + '|' + Math.round((mp || 0) * 50);
+  let _c6Key = null, _c6KeyPark = null;
+  function c6Index() {
+    const park = RIP().state.park;
+    if (_c6Key && _c6KeyPark === park) return _c6Key;
+    _c6Key = new Map(); _c6KeyPark = park;
+    for (const s of RIP().state.segments) _c6Key.set(mpKey(s.ROUTE_IDENT, s.BEG_MP), s);
+    return _c6Key;
+  }
+  const c6Seg = (rid, mp) => c6Index().get(mpKey(rid, mp)) || null;
+  const c7Seg = (rid, mp) => (c7Ready() ? CYC().matchSeg(rid, mp) : null);
+
+  function segValues(routeIdent, begMp, _ignored, metricKey) {
     const k = metricKey || state.metric;
-    const c6 = c6seg ? c6seg[k] : null;
-    let c7 = null;
-    if (c7Ready()) { const m = CYC().matchSeg(routeIdent, begMp); c7 = m ? m[k] : null; }
+    const a = c6Seg(routeIdent, begMp), b = c7Seg(routeIdent, begMp);
+    const c6 = a ? a[k] : null, c7 = b ? b[k] : null;
     return { c6: c6 == null ? null : c6, c7: c7 == null ? null : c7,
       d: (c6 != null && c7 != null) ? (c7 - c6) : null };
   }
@@ -127,60 +142,82 @@
     }
     return out.length ? Object.assign({ parts: out, box }, meta) : null;
   }
-  function build02() {
+  // Which cycle's linework to draw. Cycle 7 is the most recent survey, so it
+  // wins whenever it has been fetched with geometry; Cycle 6 (the geodatabase)
+  // is the fallback and covers routes Cycle 7 hasn't collected yet.
+  function geomSource() {
+    return (c7Ready() && CYC().hasGeometry()) ? 'c7' : 'c6';
+  }
+  function sourceSegments(src) {
+    if (src === 'c7') return (CYC().get().all || []).filter((s) => s._g);
+    return RIP().state.segments;
+  }
+  function build02(src) {
     const bands = [];
-    for (const s of RIP().state.segments) {
+    for (const s of sourceSegments(src)) {
       if (!s._g) continue;
-      const b = toBand(s._g, { rid: s.ROUTE_IDENT, begMp: s.BEG_MP, endMp: s.END_MP, seg: s });
+      const b = toBand(s._g, { rid: s.ROUTE_IDENT, begMp: s.BEG_MP, endMp: s.END_MP, src });
       if (b) bands.push(b);
     }
     return bands;
   }
-  function build10() {
-    const byRoute = RIP().state.segsByRoute, bands = [];
+  function build10(src) {
+    const byRoute = new Map();
+    for (const s of sourceSegments(src)) {
+      if (!s._g) continue;
+      let a = byRoute.get(s.ROUTE_IDENT);
+      if (!a) byRoute.set(s.ROUTE_IDENT, a = []);
+      a.push(s);
+    }
+    const bands = [];
     byRoute.forEach((segs, rid) => {
+      segs.sort((x, y) => (x.BEG_MP || 0) - (y.BEG_MP || 0));
       let bin = null, key = null;
       const flush = () => {
         if (!bin || !bin.flat.length) { bin = null; return; }
-        const b = toBand(bin.flat, { rid, begMp: bin.begMp, endMp: bin.endMp, members: bin.members });
+        // mpList (not the segment objects) so each cycle's value can be looked
+        // up independently of whose geometry built the band.
+        const b = toBand(bin.flat, { rid, begMp: bin.begMp, endMp: bin.endMp, mpList: bin.mpList, src });
         if (b) bands.push(b);
         bin = null;
       };
       for (const s of segs) {
-        if (!s._g) continue;
         const k = Math.floor((s.BEG_MP || 0) / 0.1 + 1e-6);
-        if (k !== key) { flush(); key = k; bin = { flat: [], members: [], begMp: k * 0.1, endMp: k * 0.1 + 0.1 }; }
+        if (k !== key) { flush(); key = k; bin = { flat: [], mpList: [], begMp: k * 0.1, endMp: k * 0.1 + 0.1 }; }
         for (const flat of s._g) bin.flat.push(flat);
-        bin.members.push(s);
+        bin.mpList.push(s.BEG_MP);
       }
       flush();
     });
     return bands;
   }
-  function bandsFor(res) {
+  function bandsFor(res, src) {
     const park = RIP().state.park;
-    if (state.cachePark !== park) { state.cache = {}; state.cachePark = park; }
-    if (!state.cache[res]) state.cache[res] = res === 0.02 ? build02() : build10();
-    return state.cache[res];
+    src = src || geomSource();
+    if (state.cachePark !== park) { state.cache = {}; state.cachePark = park; _c6Key = null; }
+    const ck = res + '|' + src;
+    if (!state.cache[ck]) state.cache[ck] = res === 0.02 ? build02(src) : build10(src);
+    return state.cache[ck];
   }
-  // Length-weighted mean of a metric over a band's member segments (0.1 mi).
-  function meanOf(members, key, side) {
+  // Length-weighted mean of a metric across a 0.1 mi band, per cycle.
+  function meanOf(rid, mpList, key, side) {
     let sum = 0, w = 0;
-    for (const s of members) {
-      const v = side === 'c7'
-        ? (c7Ready() ? (CYC().matchSeg(s.ROUTE_IDENT, s.BEG_MP) || {})[key] : null)
-        : s[key];
+    for (const mp of mpList) {
+      const s = side === 'c7' ? c7Seg(rid, mp) : c6Seg(rid, mp);
+      if (!s) continue;
+      const v = s[key];
       if (v != null) { const len = s.INT_LENGTH || 105.6; sum += v * len; w += len; }
     }
     return w ? sum / w : null;
   }
   function bandValues(band, metricKey) {
     const k = metricKey || state.metric;
-    if (band.members) {
-      const c6 = meanOf(band.members, k, 'c6'), c7 = meanOf(band.members, k, 'c7');
+    if (band.mpList) {
+      const c6 = meanOf(band.rid, band.mpList, k, 'c6');
+      const c7 = meanOf(band.rid, band.mpList, k, 'c7');
       return { c6, c7, d: (c6 != null && c7 != null) ? (c7 - c6) : null };
     }
-    return segValues(band.rid, band.begMp, band.seg, k);
+    return segValues(band.rid, band.begMp, null, k);
   }
 
   // ---- hover comparison -------------------------------------------------
@@ -242,7 +279,8 @@
     const iri = bandValues(band, 'IRI_AVG');
     if (iri.c6 != null || iri.c7 != null) rows.push(['IRI', iri]);
     const html = cmpTable(band.rid, band.begMp.toFixed(2) + '–' + band.endMp.toFixed(2) + ' mi'
-      + (band.members ? '  (0.1 mi mean of ' + band.members.length + ')' : ''), rows);
+      + (band.mpList ? '  (0.1 mi mean of ' + band.mpList.length + ')' : '')
+      + '  · ' + (band.src === 'c7' ? 'C7 geometry' : 'C6 geometry'), rows);
     band._hov = { v: state.hoverVer, html };
     return html;
   }
@@ -327,8 +365,10 @@
       for (const sec of lots) {
         const v = lotValues(sec, 'PCR');
         const num = state.mode === 'change' ? v.d : (state.cycle === 'c7' ? v.c7 : v.c6);
-        const col = state.mode === 'change' ? changeColor(num, state.scaleMax) : scoreColor(num);
-        if (!col) continue;
+        // A lot with no rating for the chosen cycle still gets drawn, in light
+        // grey — "not rated" is information, and an unfilled lot just looks
+        // like a lot we forgot. (Common in Cycle 7, which is still collecting.)
+        const col = (state.mode === 'change' ? changeColor(num, state.scaleMax) : scoreColor(num)) || NO_DATA_FILL;
         const rings = (sec.holes && sec.holes.length) ? [sec.alignment].concat(sec.holes) : sec.alignment;
         const pg = L.polygon(rings, { pane: PANE, color: col, weight: 2, fillColor: col,
           fillOpacity: state.opacity * 0.8, opacity: Math.min(1, state.opacity + 0.15),
@@ -437,7 +477,9 @@
       const L2 = (RIP().legend ? RIP().legend(metricDef(state.metric).kind === 'iri' ? 'IRI' : 'PCR') : []);
       legend = '<div style="font:600 10.5px system-ui;color:#8a949f;margin:8px 0 4px">' + esc(metricDef(state.metric).l) + '</div>'
         + L2.map(([lab, c]) => '<div style="display:flex;align-items:center;gap:6px;font:11px system-ui;color:#3a4653;line-height:1.5">'
-          + '<span style="display:inline-block;width:14px;height:9px;border-radius:2px;background:' + c + '"></span>' + lab + '</div>').join('');
+          + '<span style="display:inline-block;width:14px;height:9px;border-radius:2px;background:' + c + '"></span>' + lab + '</div>').join('')
+        + (state.parking ? '<div style="display:flex;align-items:center;gap:6px;font:11px system-ui;color:#3a4653;line-height:1.5">'
+          + '<span style="display:inline-block;width:14px;height:9px;border-radius:2px;background:' + NO_DATA_FILL + '"></span>not rated</div>' : '');
     } else if (state.mode === 'change') {
       const mx = state.scaleMax;
       const stops = [-mx, -mx / 2, 0, mx / 2, mx];

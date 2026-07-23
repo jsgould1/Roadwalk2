@@ -101,11 +101,11 @@
 <script src="modules/library.js" defer></script>
 <script src="modules/route-tools.js" defer></script>
 <script src="modules/aecom-toggle.js?v=2" defer></script>
-<script src="modules/rip-data.js?v=7" defer></script>
+<script src="modules/rip-data.js?v=8" defer></script>
 <script src="modules/rip-import.js?v=2" defer></script>
-<script src="modules/rip-map.js?v=9" defer></script>
+<script src="modules/rip-map.js?v=11" defer></script>
 <script src="modules/rip-pathweb.js?v=2" defer></script>
-<script src="modules/rip-cycle.js?v=4" defer></script>
+<script src="modules/rip-cycle.js?v=5" defer></script>
 <script src="modules/scope-assign.js?v=5" defer></script>
 <script src="modules/sections-table.js" defer></script>
 <script src="modules/route-menu.js?v=7" defer></script>
@@ -13536,10 +13536,16 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   let _labelCands = [];
   // Candidate nudges (px) tried in order — straight off the line first, then
   // diagonals, then progressively further out. The centroid itself is last.
+  // Rings grow outward so a chip can escape even a large parking polygon,
+  // whose centroid can sit well inside the fill. Centroid itself is last.
   const LABEL_OFFSETS = [
     [0, -15], [0, 15], [20, 0], [-20, 0],
     [17, -13], [-17, -13], [17, 13], [-17, 13],
-    [0, -28], [0, 28], [34, 0], [-34, 0],
+    [0, -30], [0, 30], [36, 0], [-36, 0],
+    [30, -24], [-30, -24], [30, 24], [-30, 24],
+    [0, -52], [0, 52], [62, 0], [-62, 0],
+    [48, -38], [-48, -38], [48, 38], [-48, 38],
+    [0, -80], [0, 80], [92, 0], [-92, 0],
     [0, 0],
   ];
   function _renderRouteLabels() {
@@ -13579,6 +13585,21 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         !(r.x2 < p.x1 || r.x1 > p.x2 || r.y2 < p.y1 || r.y1 > p.y2));
       const hitsGeom = (r) => geo.some((g) =>
         g.x >= r.x1 - 1 && g.x <= r.x2 + 1 && g.y >= r.y1 - 1 && g.y <= r.y2 + 1);
+      // A polygon's centroid is INSIDE the lot, so vertex-proximity alone never
+      // rejects it and the chip lands on the fill. Treat the interior as
+      // occupied too, which pushes lot labels outside their polygon.
+      const isArea = c.sec.type === 'area' && geo.length >= 3;
+      const inPoly = (x, y) => {
+        let inside = false;
+        for (let i = 0, j = geo.length - 1; i < geo.length; j = i++) {
+          const xi = geo[i].x, yi = geo[i].y, xj = geo[j].x, yj = geo[j].y;
+          if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-9) + xi) inside = !inside;
+        }
+        return inside;
+      };
+      const hitsArea = (r) => isArea && (
+        inPoly((r.x1 + r.x2) / 2, (r.y1 + r.y2) / 2)
+        || inPoly(r.x1, r.y1) || inPoly(r.x2, r.y2) || inPoly(r.x1, r.y2) || inPoly(r.x2, r.y1));
 
       // Try offsets around the anchor; prefer clear of both, then merely clear
       // of other labels, and give up rather than stack chips on each other.
@@ -13586,7 +13607,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       for (const [dx, dy] of LABEL_OFFSETS) {
         const r = rectAt(dx, dy);
         if (hitsPlaced(r)) continue;
-        if (!hitsGeom(r)) { chosen = { dx, dy, r }; break; }
+        if (!hitsGeom(r) && !hitsArea(r)) { chosen = { dx, dy, r }; break; }
         if (!fallback) fallback = { dx, dy, r };
       }
       const pick = chosen || fallback;
