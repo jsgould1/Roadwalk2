@@ -510,6 +510,7 @@
       + pcrDot(ripOf(sec).PCR)
       + conditionBar(g.segs)
       + '<span style="font-size:11.5px;color:#8a949f;flex:0 0 auto;min-width:52px;text-align:right">' + note + '</span>'
+      + (window.RW2Pathweb ? '<button data-pw="' + esc(sec.id) + '" data-nodetail="1" title="Open this route in NPS PathWeb" style="border:1px solid #cdd6df;background:#fff;color:#0B3D66;border-radius:6px;padding:1px 6px;cursor:pointer;font:700 10px system-ui;flex:0 0 auto">PW ↗</button>' : '')
       + '<button data-goto="' + esc(sec.id) + '" data-nodetail="1" title="Show on map" style="border:0;background:transparent;cursor:pointer;font-size:14px;flex:0 0 auto">🗺</button>'
       + '</div></td></tr>';
   }
@@ -624,11 +625,15 @@
       + '<div style="font-size:12px;color:#8a949f;margin-top:2px">' + (isLot ? 'Parking lot' : 'Road') + ' · ' + esc(state.park) + (sec.in_scope ? ' · <b style="color:#0e7c66">in scope</b>' : ' · out of scope') + '</div></div>'
       + '<button id="rip-drawer-x" style="border:0;background:#eef1f4;border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:15px">✕</button></div>'
       + '<div style="overflow:auto;padding:14px 16px;flex:1">' + segHtml + groupHtml + '</div>'
-      + '<div style="padding:11px 16px;border-top:1px solid #eef1f4;display:flex;gap:8px">'
+      + '<div style="padding:11px 16px;border-top:1px solid #eef1f4;display:flex;gap:8px;flex-wrap:wrap">'
+      + (sec.type === 'linear' && window.RW2Pathweb ? '<button id="rip-drawer-pw" title="Open this spot in NPS PathWeb imagery" style="border:0;background:#0B3D66;color:#fff;border-radius:9px;padding:9px 12px;cursor:pointer;font-weight:700">PathWeb ↗</button>' : '')
       + '<button id="rip-drawer-map" style="flex:1;border:0;background:#1a73e8;color:#fff;border-radius:9px;padding:9px;cursor:pointer;font-weight:700">🗺 Show on map</button>'
       + '<button id="rip-drawer-scope" style="border:1px solid #d3dae1;background:#fff;border-radius:9px;padding:9px 13px;cursor:pointer;font-weight:600;color:#12233b">' + (sec.in_scope ? 'Remove scope' : 'Set in scope') + '</button></div>';
     document.body.appendChild(d);
+    // Milepost for the PathWeb frame: the open segment's midpoint, else route start.
+    const pwMile = seg ? ((seg.BEG_MP + seg.END_MP) / 2) : (a.BEG_MP_DCV || 0);
     $('rip-drawer-x').onclick = () => d.remove();
+    const pw = $('rip-drawer-pw'); if (pw) pw.onclick = () => window.RW2Pathweb.open(sec, pwMile, 'c6');
     $('rip-drawer-map').onclick = () => { if (RW().showView) RW().showView('field', sec.id); if (window.showModule) window.showModule('map'); d.remove(); };
     $('rip-drawer-scope').onclick = () => {
       sec.in_scope = !sec.in_scope;
@@ -828,6 +833,13 @@
       e.stopPropagation();
       if (RW().showView) RW().showView('field', b.dataset.goto);
       if (window.showModule) window.showModule('map');
+    });
+    host.querySelectorAll('[data-pw]').forEach((b) => b.onclick = (e) => {
+      e.stopPropagation();
+      const sec = sections().find((s) => s.id === b.dataset.pw); if (!sec || !window.RW2Pathweb) return;
+      const segs = state.segsByRoute.get(sec.route_id) || [];
+      const mile = segs.length ? ((segs[0].BEG_MP + segs[0].END_MP) / 2) : (ripOf(sec).BEG_MP_DCV || 0);
+      window.RW2Pathweb.open(sec, mile, 'c6');
     });
     host.querySelectorAll('[data-detail]').forEach((tr) => tr.onclick = (e) => {
       if (e.target.closest('[data-nodetail]') || e.target.tagName === 'INPUT') return;
