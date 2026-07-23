@@ -12478,7 +12478,10 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     draftKickoff: null,      // { sectionId, type, answers: {} }
     // settings
     settings: {
-      basemap: 'nearmap',  // default — Nearmap has better zoom resolution
+      // Default imagery is Esri Aerial (always available, no key). It is
+      // upgraded to Nearmap after boot only when a Nearmap key is present —
+      // see the key block, which also respects an explicit user pick.
+      basemap: 'esri_aerial',
       autosaveMin: 5,
       backupMin: 60,
       triageTimeGapSec: 60,    // suggest-grouping: max ts gap between two photos
@@ -12891,7 +12894,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
           if (replaceSec) state.map.setView(replaceSec.center, 17);
           else state.map.invalidateSize();
           // Recovery: ensure basemap is loaded if it was missed earlier
-          if (!state.currentBasemap) setBasemap(state.settings.basemap || 'nearmap');
+          if (!state.currentBasemap) setBasemap(state.settings.basemap || 'esri_aerial');
         }
         $('#trace-banner').classList.add('open');
         $('#trace-banner-type').textContent = isReplace ? 'ADJUSTING CL' : `TRACING ${typeLabel}`;
@@ -13011,7 +13014,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       }).setView((sec && sec.center) || HOME_CENTER, (sec && sec.center) ? 17 : HOME_ZOOM);
 
       // Basemap — obey the current settings choice (defaults to Nearmap for testing)
-      setBasemap(state.settings.basemap || 'nearmap');
+      setBasemap(state.settings.basemap || 'esri_aerial');
 
       // Blue "you are here" dot — created once, shown when we have a GPS fix.
       // Sits in markerPane so it's above tiles but below pins.
@@ -13071,12 +13074,26 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       // Within-section re-renders (pin edits, vertex drags, etc.) preserve
       // the user's current view so they don't get yanked back to extent.
       if (state.mapLayers._lastSecId !== sec.id) {
-        state.map.setView(sec.center, 17);
+        // Frame the selected route itself — not the whole park, and not a
+        // fixed zoom that lands mid-route on a long road.
+        let fitted = false;
+        const al = sec.alignment;
+        if (Array.isArray(al) && al.length >= 2) {
+          try {
+            const bb = L.latLngBounds(al);
+            (sec.holes || []).forEach((h) => (h || []).forEach((p) => bb.extend(p)));
+            if (bb.isValid()) {
+              state.map.fitBounds(bb, { padding: [40, 40], maxZoom: 18 });
+              fitted = true;
+            }
+          } catch (_) {}
+        }
+        if (!fitted) state.map.setView(sec.center, 17);
       }
       if (state.mapLayers.me) state.mapLayers.me.setLatLng(sec.center);
       // Recovery: if the basemap layer was never added (e.g. previous API key
       // alert aborted setBasemap), retry it now so the map isn't blank.
-      if (!state.currentBasemap) setBasemap(state.settings.basemap || 'nearmap');
+      if (!state.currentBasemap) setBasemap(state.settings.basemap || 'esri_aerial');
     }
 
     // Clear and redraw alignment
@@ -13373,6 +13390,9 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     if (state.map && !state.map._rwWidthZoomWired) {
       state.map._rwWidthZoomWired = true;
       state.map.on('zoomend', _renderWidthLabels);
+      // Route labels are deconflicted in screen space, so they must be
+      // re-placed whenever the view changes.
+      state.map.on('zoomend moveend', () => { try { _renderRouteLabels(); } catch (_) {} });
     }
     _renderWidthLabels();
     _renderSectionInfoCards();
@@ -13388,10 +13408,28 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   // Route-ID label at a section's centroid. `selected` (the active section)
   // renders in the selected color (navy pill), otherwise the unselected color
   // (orange). Empty route_id shows NULL. Non-interactive so it never eats taps.
+  // What a route label shows. Set via window.RW2LabelMode (see RW2MapLabels):
+  //   id | id_pcr | id_name | pcr | name | none
+  function _labelText(sec) {
+    const mode = window.RW2LabelMode || 'id';
+    if (mode === 'none') return '';
+    const rid = (sec.route_id != null && String(sec.route_id).trim()) || 'NULL';
+    const rip = sec.rip || {};
+    const pcr = rip.PCR != null ? rip.PCR : null;
+    const pcrTxt = pcr == null ? '—' : pcr;
+    switch (mode) {
+      case 'id_pcr': return rid + ' (' + pcrTxt + ')';
+      case 'id_name': return rid + ' · ' + (sec.name || '');
+      case 'pcr': return String(pcrTxt);
+      case 'name': return sec.name || rid;
+      default: return rid;
+    }
+  }
   function _routeIdLabel(sec, selected) {
     const al = sec && sec.alignment;
     if (!Array.isArray(al) || !al.length) return null;
-    const rid = (sec.route_id != null && String(sec.route_id).trim()) || 'NULL';
+    const rid = _labelText(sec);
+    if (!rid) return null;
     const cLat = al.reduce((a, p) => a + p[0], 0) / al.length;
     const cLng = al.reduce((a, p) => a + p[1], 0) / al.length;
     const css = selected
@@ -13412,6 +13450,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       try { state.mapLayers.subOutlines.remove(); } catch (_) {}
       state.mapLayers.subOutlines = null;
     }
+    _labelCands = [];
     if (!state.map || typeof SECTIONS === 'undefined' || !Array.isArray(SECTIONS)) return;
     const curId = currentSec && currentSec.id;
     // A section is a subsection when its id is not one of the bundle's own.
@@ -13433,10 +13472,19 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       const align = sub.alignment;
       if (!Array.isArray(align) || align.length < 2) return;
       const isArea = sub.type === 'area' && align.length >= 3;
+      // Non-selected sections read as a plain solid black outline so the
+      // condition colouring underneath stays legible (no competing hue, no
+      // dashes breaking up the band).
       const layer = isArea
-        ? L.polygon(_areaPolyLatLngs(sub), { color: '#C85A2B', weight: 2, dashArray: '5 4', fillColor: '#C85A2B', fillOpacity: 0.10, interactive: true, bubblingMouseEvents: false, pane: 'overlayPane' })
-        : L.polyline(align, { color: '#C85A2B', weight: 2, dashArray: '5 4', opacity: 0.55, interactive: true, bubblingMouseEvents: false, pane: 'overlayPane' });
-      layer.on('click', (e) => {
+        ? L.polygon(_areaPolyLatLngs(sub), { color: '#111', weight: 1.5, fill: true, fillColor: '#000', fillOpacity: 0.03, opacity: 0.85, interactive: false, pane: 'overlayPane' })
+        : L.polyline(align, { color: '#111', weight: 1.5, opacity: 0.85, interactive: false, pane: 'overlayPane' });
+      // A 1.5px outline is far too fine to hit reliably, so taps land on a fat
+      // invisible companion instead (same trick as the active section's
+      // alignmentHit). The visible outline itself is non-interactive.
+      const hit = isArea
+        ? L.polygon(_areaPolyLatLngs(sub), { color: '#000', weight: 16, opacity: 0, fill: true, fillOpacity: 0, interactive: true, bubblingMouseEvents: false, pane: 'overlayPane' })
+        : L.polyline(align, { color: '#000', weight: 22, opacity: 0, interactive: true, bubblingMouseEvents: false, pane: 'overlayPane' });
+      hit.on('click', (e) => {
         if (e && e.originalEvent && L.DomEvent) L.DomEvent.stopPropagation(e.originalEvent);
         if (drawState && drawState.tool) return;
         if (relocateState && relocateState.active) return;
@@ -13453,18 +13501,66 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         showView('field', sub.id);
       });
       try {
-        layer.bindTooltip(esc(sub.name || 'Section') + ' — tap to open',
+        hit.bindTooltip(esc(sub.name || 'Section') + ' — tap to open',
           { sticky: true, direction: 'top', opacity: 0.95, className: 'rw-feature-tooltip' });
       } catch (_) {}
       grp.addLayer(layer);
-      if (showChips) {
-        const lbl = _routeIdLabel(sub, false);   // Route-ID label, unselected color
-        if (lbl) grp.addLayer(lbl);
-      }
+      grp.addLayer(hit);
+      // Labels are placed separately so they can be deconflicted in screen
+      // space (and re-placed on zoom) rather than piling up at centroids.
+      _labelCands.push({ sec: sub, selected: false });
       n++;
     });
     if (n) { grp.addTo(state.map); state.mapLayers.subOutlines = grp; }
+    // In-scope routes get first claim on the available space.
+    _labelCands.sort((a, b) => (b.sec.in_scope ? 1 : 0) - (a.sec.in_scope ? 1 : 0));
+    _renderRouteLabels();
   }
+
+  // Place route labels greedily, skipping any that would overlap one already
+  // placed at the current zoom. Only labels whose anchor is in view are
+  // considered, and the total is capped so a 1900-route park stays responsive.
+  let _labelCands = [];
+  function _renderRouteLabels() {
+    if (state.mapLayers.subLabels) {
+      try { state.mapLayers.subLabels.remove(); } catch (_) {}
+      state.mapLayers.subLabels = null;
+    }
+    if (!state.map || (window.RW2LabelMode || 'id') === 'none' || !_labelCands.length) return;
+    const bounds = state.map.getBounds();
+    const placed = [], grp = L.layerGroup();
+    const MAX_LABELS = 150;
+    let count = 0;
+    for (const c of _labelCands) {
+      if (count >= MAX_LABELS) break;
+      const al = c.sec && c.sec.alignment;
+      if (!Array.isArray(al) || !al.length) continue;
+      const cLat = al.reduce((a, p) => a + p[0], 0) / al.length;
+      const cLng = al.reduce((a, p) => a + p[1], 0) / al.length;
+      if (!bounds.contains([cLat, cLng])) continue;
+      const txt = _labelText(c.sec);
+      if (!txt) continue;
+      let pt; try { pt = state.map.latLngToContainerPoint([cLat, cLng]); } catch (_) { continue; }
+      const w = txt.length * 6.6 + 14, h = 17;
+      const r = { x1: pt.x - w / 2, y1: pt.y - h / 2, x2: pt.x + w / 2, y2: pt.y + h / 2 };
+      let clash = false;
+      for (const p of placed) {
+        if (!(r.x2 < p.x1 || r.x1 > p.x2 || r.y2 < p.y1 || r.y1 > p.y2)) { clash = true; break; }
+      }
+      if (clash) continue;
+      const lbl = _routeIdLabel(c.sec, c.selected);
+      if (lbl) { placed.push(r); grp.addLayer(lbl); count++; }
+    }
+    if (count) { grp.addTo(state.map); state.mapLayers.subLabels = grp; }
+  }
+  // Label content is user-selectable; changing it re-places immediately.
+  window.RW2MapLabels = {
+    modes: [['id', 'Route ID'], ['id_pcr', 'Route ID (PCR)'], ['id_name', 'Route ID · Name'],
+            ['pcr', 'PCR only'], ['name', 'Name'], ['none', 'No labels']],
+    get: () => window.RW2LabelMode || 'id',
+    set: (m) => { window.RW2LabelMode = m; try { _renderRouteLabels(); } catch (_) {} },
+    refresh: () => { try { _renderRouteLabels(); } catch (_) {} },
+  };
 
   // --- Basemap registry --------------------------------------------------
   // Each entry either has a `build()` that returns a Leaflet TileLayer,
@@ -14435,7 +14531,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     try {
       state.map.invalidateSize();
       state.map.setView(HOME_CENTER, zoom || HOME_ZOOM);
-      if (!state.currentBasemap) setBasemap(state.settings.basemap || 'nearmap');
+      if (!state.currentBasemap) setBasemap(state.settings.basemap || 'esri_aerial');
     } catch (_) { return false; }
     return true;
   };
@@ -14458,7 +14554,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       requestAnimationFrame(function () {
         if (!state.map) initOrUpdateMap({ id: '__map__', type: 'area', name: '', center: ctr, alignment: null, pins: [] });
         else { state.map.invalidateSize(); state.map.setView(ctr, state.map.getZoom() || HOME_ZOOM); }
-        if (!state.currentBasemap) setBasemap(state.settings.basemap || 'nearmap');
+        if (!state.currentBasemap) setBasemap(state.settings.basemap || 'esri_aerial');
       });
     } catch (e) { console.warn('openMap', e); }
     return true;
@@ -24655,6 +24751,9 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   basemapSelect?.addEventListener('change', async () => {
     const key = basemapSelect.value;
     const ok = await setBasemap(key);
+    // Remember an explicit pick so the Nearmap-over-Esri default never
+    // overrides it on the next boot.
+    if (ok) state.settings.basemapChosen = true;
     if (!ok) syncBasemapSelect();   // revert to current on failure
   });
 
@@ -26234,6 +26333,9 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       if (btn.disabled) return;
       const key = btn.dataset.map;
       const ok = await setBasemap(key);
+      // Remember an explicit pick so the Nearmap-over-Esri default never
+      // overrides it on the next boot.
+      if (ok) state.settings.basemapChosen = true;
       if (!ok) {
         // setBasemap handles its own error alert; revert UI selection
         $$('#basemap-row .basemap-btn').forEach(b =>
@@ -26253,6 +26355,11 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   // Always apply hardcoded keys — overrides any cleared Settings input
   state.settings.apiKeys.nearmap = HARDCODED_NEARMAP_KEY;
   state.settings.apiKeys.google  = HARDCODED_GOOGLE_KEY;
+  // Imagery default: Esri Aerial, upgraded to Nearmap when a key is available
+  // (better zoom resolution). An explicit basemap pick by the user always wins.
+  if (!state.settings.basemapChosen && state.settings.apiKeys.nearmap) {
+    state.settings.basemap = 'nearmap';
+  }
   // Mirror them into the Settings inputs so the user can see they're loaded
   const _nmInput = $('#s-nearmap-key');
   if (_nmInput && !_nmInput.value) _nmInput.value = state.settings.apiKeys.nearmap;

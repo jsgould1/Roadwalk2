@@ -28,6 +28,9 @@
   const MINZOOM = { 0.1: 12, 0.02: 14 };
   const MAXPATHS = 6000;
   const PANE = 'ripBands';
+  // Overlay opacity — low enough to read the pavement through the colour.
+  // Lot outlines get a little more so the boundary still reads.
+  const BAND_OPACITY = 0.25;
 
   // Metrics offered. `k` is the Cycle 6 field name; Cycle 7 is mapped to the
   // same keys by rip-cycle.js. Parking only has PCR.
@@ -284,7 +287,7 @@
         const col = colorOf(v, max);
         if (!col) continue;
         for (const pts of band.parts) {
-          const pl = L.polyline(pts, { pane: PANE, color: col, weight: 6, opacity: 0.95,
+          const pl = L.polyline(pts, { pane: PANE, color: col, weight: 6, opacity: BAND_OPACITY,
             lineCap: 'butt', interactive: true, bubblingMouseEvents: false });
           pl.on('mouseover', (e) => showHover(bandHover(band), e));
           pl.on('mousemove', (e) => showHover(bandHover(band), e));
@@ -306,7 +309,8 @@
         if (!col) continue;
         const rings = (sec.holes && sec.holes.length) ? [sec.alignment].concat(sec.holes) : sec.alignment;
         const pg = L.polygon(rings, { pane: PANE, color: col, weight: 2, fillColor: col,
-          fillOpacity: 0.55, opacity: 0.95, interactive: true, bubblingMouseEvents: false });
+          fillOpacity: BAND_OPACITY, opacity: Math.min(1, BAND_OPACITY + 0.35),
+          interactive: true, bubblingMouseEvents: false });
         pg.on('mouseover', (e) => showHover(lotHover(sec), e));
         pg.on('mousemove', (e) => showHover(lotHover(sec), e));
         pg.on('mouseout', hideHover);
@@ -341,29 +345,37 @@
     + (active ? '#0B3D66' : '#fff') + ';color:' + (active ? '#fff' : '#33414f')
     + ';padding:4px 9px;border-radius:7px;cursor:pointer;font:600 11.5px system-ui">' + label + '</button>';
 
+  // Live inside the map's own left button stack, directly below Layers, using
+  // its .map-ctl-btn styling. (Floating over the stack meant the stack's own
+  // container swallowed the clicks.) The panel opens beside it exactly like
+  // .layers-panel does.
   function mount() {
-    const host = document.getElementById('view-field');
-    if (!host) return null;
+    const stack = document.getElementById('fp-left-stack');
+    const layersBtn = document.getElementById('layers-toggle-btn');
+    if (!stack || !layersBtn) return null;
     let btn = document.getElementById('rip-band-btn');
     if (!btn) {
       btn = document.createElement('button');
       btn.id = 'rip-band-btn';
+      btn.className = 'map-ctl-btn';
+      btn.type = 'button';
       btn.title = 'Condition colours';
-      btn.style.cssText = 'position:absolute;left:12px;top:150px;z-index:641;width:36px;height:36px;'
-        + 'display:flex;align-items:center;justify-content:center;background:#fff;border:1px solid #cfd6dd;'
-        + 'border-radius:9px;box-shadow:0 2px 8px rgba(20,35,60,.22);cursor:pointer;padding:0';
       btn.innerHTML = ICON;
-      btn.addEventListener('click', () => { state.open = !state.open; paint(); });
-      host.appendChild(btn);
+      btn.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        state.open = !state.open; paint();
+      });
+      layersBtn.insertAdjacentElement('afterend', btn);
     }
     let panel = document.getElementById('rip-band-panel');
     if (!panel) {
       panel = document.createElement('div');
       panel.id = 'rip-band-panel';
-      panel.style.cssText = 'position:absolute;left:56px;top:150px;z-index:642;background:rgba(255,255,255,.98);'
-        + 'border:1px solid #cfd6dd;border-radius:11px;box-shadow:0 4px 18px rgba(20,35,60,.24);'
-        + 'padding:10px 12px;font-family:system-ui;width:232px;display:none';
-      host.appendChild(panel);
+      panel.style.cssText = 'position:absolute;left:calc(34px + 10px);z-index:640;'
+        + 'background:var(--paper,#fff);border:1px solid var(--rule,#cfd6dd);border-radius:10px;'
+        + 'box-shadow:0 2px 10px rgba(0,0,0,.18);padding:10px 12px;font-family:system-ui;'
+        + 'width:232px;display:none;pointer-events:auto';
+      stack.appendChild(panel);
     }
     return btn;
   }
