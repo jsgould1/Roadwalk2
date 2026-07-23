@@ -149,7 +149,12 @@
     custom: [],        // [{ key, label }]
     expanded: new Set(),   // route ids expanded in the Conditions tree
     colMenuOpen: false,
+    cycle: 'c6',       // condition data source for Conditions/Analysis: 'c6' | 'c7'
+    analMetric: 'PCR', // metric featured in the Analysis (Δ) tab
+    analRes: 0.02,     // Analysis granularity in miles: 0.02 | 0.1
   };
+  // Metrics that exist in BOTH cycles (drives the Analysis metric picker).
+  const CYCLE_METRICS = ['PCR', 'SCR', 'RCI', 'SC_INDEX', 'AC_INDEX', 'LC_INDEX', 'TC_INDEX', 'PATCH_INDEX', 'RUT_INDEX'];
 
   const FACETS = [
     ['SURF_TYPE', 'Surface'], ['FACILITY_TYPE', 'Facility'], ['USER_ACCESS', 'Access'],
@@ -251,11 +256,21 @@
       return true;
     });
   }
+  // Segments for the currently-selected condition cycle. Cycle 7 comes from the
+  // live FeatureServer (RW2RIPCycle), mapped to the same metric keys as Cycle 6.
+  function c7Ready() {
+    return state.cycle === 'c7' && window.RW2RIPCycle && window.RW2RIPCycle.hasData()
+      && window.RW2RIPCycle.park() === state.park;
+  }
+  function activeSegments() { return c7Ready() ? window.RW2RIPCycle.get().all : state.segments; }
+  function activeByRoute(routeId) {
+    return c7Ready() ? window.RW2RIPCycle.segmentsFor(routeId) : (state.segsByRoute.get(routeId) || []);
+  }
   function filteredConditions() {
     const parents = new Map();
     for (const s of ripSections()) if (s.route_id) parents.set(s.route_id, s);
     const out = [];
-    for (const seg of state.segments) {
+    for (const seg of activeSegments()) {
       const sec = parents.get(seg.ROUTE_IDENT); if (!sec) continue;
       const a = ripOf(sec);
       const kindOk = state.kind === 'all' || state.kind === 'road';
@@ -357,6 +372,10 @@
         return [s.route_id, s.name, s.type === 'area' ? 'Lot' : 'Road', g.vtx, g.holes,
           g.lengthFt != null ? g.lengthFt.toFixed(1) : '', g.areaSf || '',
           a.BEG_MP_DCV, a.END_MP_DCV, ...(g.box || ['', '', '', ''])]; });
+    } else if (state.tab === 'analysis') {
+      const m = state.analMetric;
+      header = ['Route ID', 'Name', 'Begin MP', 'End MP', 'C6 ' + meta(m).l, 'C7 ' + meta(m).l, 'Delta', 'Resolution'];
+      rows = analysisRows().map((r) => [r.sec.route_id, r.sec.name, r.begMp.toFixed(3), r.endMp.toFixed(3), r.c6, r.c7, r.d, state.analRes + ' mi']);
     } else { return; }
     const csv = [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
     download('RIP_' + park + '_' + state.tab + '.csv', csv);
@@ -499,7 +518,7 @@
   }
   function bannerRow(g, exp, ncols) {
     const sec = g.sec;
-    const totalSegs = (state.segsByRoute.get(sec.route_id) || []).length;
+    const totalSegs = activeByRoute(sec.route_id).length;
     const note = g.segs.length === totalSegs ? (g.segs.length + ' seg') : (g.segs.length + ' of ' + totalSegs);
     return '<tr data-exp="' + esc(sec.id) + '" style="cursor:pointer;background:#f5f8fb;border-top:2px solid #e6ecf2">'
       + '<td colspan="' + ncols + '" style="padding:6px 9px">'
@@ -699,7 +718,135 @@
     return html.join('');
   }
 
-  const TABS = [['assets', 'Assets'], ['conditions', 'Conditions'], ['geometry', 'Geometry'], ['custom', 'Custom']];
+  const TABS = [['assets', 'Assets'], ['conditions', 'Conditions'], ['geometry', 'Geometry'], ['analysis', 'Δ Cycle 6→7'], ['custom', 'Custom']];
+
+  // Kick off a Cycle 7 fetch for the current park when it's needed (Cycle 7
+  // view or the Analysis tab). Cache-first; re-renders when it lands.
+  function ensureC7() {
+    const C = window.RW2RIPCycle; if (!C) return;
+    const st = C.get();
+    if (st.park === state.park && (st.all.length || st.loading)) return;
+    C.loadPark(state.park, { onchange: () => render() });
+  }
+
+  // ---- cycle-over-cycle analysis ---------------------------------------
+  // Break a route's segments into comparison units at the chosen resolution:
+  // 0.02 mi = one per segment; 0.1 mi = length-weighted mean of ~5 segments.
+  // `key` is the shared bin index so Cycle 6 and Cycle 7 units line up.
+  function unitsFor(segs, res, metric) {
+    if (res === 0.1) {
+      const bins = new Map();
+      for (const s of segs) {
+        const b = Math.floor((s.BEG_MP || 0) / 0.1 + 1e-6);
+        let g = bins.get(b); if (!g) bins.set(b, g = { begMp: b * 0.1, endMp: b * 0.1 + 0.1, sum: 0, w: 0 });
+        if (s[metric] != null) { const len = s.INT_LENGTH || 105.6; g.sum += s[metric] * len; g.w += len; }
+      }
+      return [...bins.values()].sort((a, b) => a.begMp - b.begMp)
+        .map((g) => ({ begMp: g.begMp, endMp: g.endMp, v: g.w ? g.sum / g.w : null, key: Math.round(g.begMp / 0.1) }));
+    }
+    return segs.map((s) => ({ begMp: s.BEG_MP, endMp: s.END_MP, v: s[metric], key: Math.round((s.BEG_MP || 0) / 0.02) }));
+  }
+  function analysisRows() {
+    const metric = state.analMetric, res = state.analRes;
+    const C = window.RW2RIPCycle;
+    const roads = filteredAssets().filter((s) => s.type !== 'area');
+    const rows = [];
+    for (const sec of roads) {
+      const c6u = unitsFor(state.segsByRoute.get(sec.route_id) || [], res, metric);
+      if (!c6u.length) continue;
+      const c7segs = C.segmentsFor(sec.route_id);
+      const c7map = new Map(unitsFor(c7segs, res, metric).map((u) => [u.key, u]));
+      const hasC7 = c7segs.length > 0;
+      for (const u of c6u) {
+        const c7u = c7map.get(u.key);
+        const c6 = u.v, c7 = c7u ? c7u.v : null;
+        rows.push({ sec, begMp: u.begMp, endMp: u.endMp, c6, c7,
+          d: (c6 != null && c7 != null) ? (c7 - c6) : null, hasC7 });
+      }
+    }
+    return rows;
+  }
+  // Δ colour: all comparison metrics are 0-100 higher-is-better, so a positive
+  // delta (improved) is green, negative (declined) red, intensity by magnitude.
+  function deltaColor(d) {
+    if (d == null) return '#c3cad2';
+    if (d > 0) return d >= 15 ? '#1a9850' : d >= 5 ? '#66bd63' : '#c7e9b4';
+    if (d < 0) return d <= -15 ? '#d73027' : d <= -5 ? '#f46d43' : '#fddbc7';
+    return '#e6ebf0';
+  }
+  function analysisTable() {
+    const C = window.RW2RIPCycle;
+    const st = C && C.get();
+    const ready = C && C.hasData() && C.park() === state.park;
+    if (!ready) {
+      const loading = st && st.loading && st.park === state.park;
+      const err = st && st.error && st.park === state.park;
+      return { total: 0, shown: 0, html:
+        '<div style="padding:36px 22px;text-align:center;color:#5b6673;font:14px system-ui">'
+        + (err ? '<div style="color:#c0392b;margin-bottom:10px">Cycle 7 load failed: ' + esc(st.error) + '</div><button id="rip-anal-load" style="border:0;background:#1a73e8;color:#fff;border-radius:9px;padding:9px 16px;cursor:pointer;font-weight:700">Retry</button>'
+          : loading ? '<div style="font-size:15px;font-weight:700;color:#12233b;margin-bottom:6px">Loading Cycle 7…</div>Fetching the live EFLHD-RIP data for ' + esc(state.park) + '.'
+          : '<div style="font-size:15px;font-weight:700;color:#12233b;margin-bottom:6px">Cycle-over-cycle analysis</div>Compare Cycle 6 vs the live Cycle 7 collection.<br><br><button id="rip-anal-load" style="border:0;background:#1a73e8;color:#fff;border-radius:9px;padding:9px 16px;cursor:pointer;font-weight:700">Load Cycle 7 for ' + esc(state.park) + '</button>')
+        + '</div>' };
+    }
+
+    const metric = state.analMetric, res = state.analRes;
+    let rows = analysisRows();
+    // sort: default biggest change first (|Δ| desc), else by chosen column
+    const sk = state.sort.key, dir = state.sort.dir;
+    rows.sort((a, b) => {
+      const get = (r) => sk === 'route' ? r.sec.route_id : sk === 'mp' ? r.begMp
+        : sk === 'c6' ? r.c6 : sk === 'c7' ? r.c7 : r.d;
+      if (state.sort.key === 'ROUTE_IDENT') { // default → biggest movers first
+        const am = a.d == null ? -1 : Math.abs(a.d), bm = b.d == null ? -1 : Math.abs(b.d);
+        return bm - am || a.sec.route_id.localeCompare(b.sec.route_id) || a.begMp - b.begMp;
+      }
+      let x = get(a), y = get(b); const xn = x == null, yn = y == null;
+      if (xn && yn) return 0; if (xn) return 1; if (yn) return -1;
+      return typeof x === 'number' ? (x - y) * dir : String(x).localeCompare(String(y)) * dir;
+    });
+
+    // summary over units that have both cycles
+    const both = rows.filter((r) => r.d != null);
+    const imp = both.filter((r) => r.d > 0).length, dec = both.filter((r) => r.d < 0).length, same = both.filter((r) => r.d === 0).length;
+    const meanD = both.length ? both.reduce((s, r) => s + r.d, 0) / both.length : null;
+    const routeIds = [...new Set(rows.map((r) => r.sec.route_id))];
+    const cov = C.coverage(routeIds);
+    const noC7 = rows.filter((r) => !r.hasC7).length;
+
+    const stat = (label, val, color) => '<div style="flex:1;min-width:96px;background:#f7f9fb;border:1px solid #eef1f4;border-radius:9px;padding:9px 11px">'
+      + '<div style="font-size:11px;color:#8a949f;text-transform:uppercase;letter-spacing:.4px">' + label + '</div>'
+      + '<div style="font-size:18px;font-weight:800;color:' + (color || '#12233b') + '">' + val + '</div></div>';
+    const summary = '<div style="display:flex;gap:9px;flex-wrap:wrap;margin-bottom:12px">'
+      + stat('Mean Δ ' + meta(metric).l, meanD == null ? '—' : (meanD > 0 ? '+' : '') + meanD.toFixed(1), meanD == null ? '#8a949f' : meanD >= 0 ? '#0e7c66' : '#c0392b')
+      + stat('Improved', imp, '#0e7c66') + stat('Declined', dec, '#c0392b') + stat('Unchanged', same)
+      + stat('Compared', both.length + ' / ' + rows.length)
+      + stat('Routes w/ C7', cov.routesWithC7 + ' / ' + cov.totalRoutes, cov.routesWithC7 < cov.totalRoutes ? '#b26a00' : '#0e7c66')
+      + '</div>';
+
+    const shown = rows.slice(0, state.limit);
+    const dcell = (v, isDelta) => {
+      if (v == null) return '<td style="padding:5px 9px;text-align:right;color:#c3cad2">—</td>';
+      const bg = isDelta ? deltaColor(v) : cellColor(metric, v);
+      const txt = isDelta ? ((v > 0 ? '+' : '') + v.toFixed(res === 0.1 ? 1 : 0)) : (res === 0.1 ? Number(v).toFixed(1) : v);
+      if (isDelta) return '<td style="padding:5px 9px;text-align:right;font-variant-numeric:tabular-nums"><span style="display:inline-block;min-width:34px;text-align:center;background:' + bg + ';color:#12233b;border-radius:5px;padding:1px 6px;font-weight:700">' + txt + '</span></td>';
+      return '<td style="padding:5px 9px;text-align:right;font-variant-numeric:tabular-nums"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:' + (bg || '#c3cad2') + ';margin-right:6px;vertical-align:middle"></span>' + esc(txt) + '</td>';
+    };
+    const body = shown.map((r) => '<tr data-detail="' + esc(r.sec.id) + '" data-seg="' + (r.begMp != null && res === 0.02 ? r.begMp : '') + '" style="border-bottom:1px solid #f2f5f8;cursor:pointer">'
+      + '<td style="padding:5px 9px;font:700 12px \'IBM Plex Mono\',monospace;color:#0B3D66;white-space:nowrap">' + esc(r.sec.route_id) + '</td>'
+      + '<td style="padding:5px 9px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(r.sec.name) + '</td>'
+      + '<td style="padding:5px 9px;text-align:right;font:12px \'IBM Plex Mono\',monospace;color:#5b6673;white-space:nowrap">' + r.begMp.toFixed(2) + '–' + r.endMp.toFixed(2) + '</td>'
+      + dcell(r.c6, false) + dcell(r.c7, false) + dcell(r.d, true)
+      + '<td style="padding:5px 9px" data-nodetail="1"><button data-pw-seg="' + esc(r.sec.id) + '|' + (r.begMp != null ? r.begMp : '') + '" title="PathWeb" style="border:0;background:transparent;cursor:pointer;font-size:13px">📷</button></td>'
+      + '</tr>').join('');
+    const aTh = (k, l, r) => '<th data-asort="' + k + '" style="position:sticky;top:0;background:#f7f9fb;z-index:1;text-align:' + (r ? 'right' : 'left') + ';padding:7px 9px;border-bottom:1px solid #e3e8ee;cursor:pointer;font:700 11.5px system-ui;color:#12233b;white-space:nowrap">' + l + (state.sort.key === k ? (state.sort.dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
+    const table = '<table style="width:100%;border-collapse:collapse;font:13px system-ui"><thead><tr>'
+      + aTh('route', 'Route ID') + aTh('name', 'Name') + aTh('mp', 'MP', 1)
+      + aTh('c6', 'C6 ' + meta(metric).l, 1) + aTh('c7', 'C7 ' + meta(metric).l, 1) + aTh('d', 'Δ', 1)
+      + '<th style="position:sticky;top:0;background:#f7f9fb;border-bottom:1px solid #e3e8ee;width:30px"></th>'
+      + '</tr></thead><tbody>' + body + '</tbody></table>';
+    return { total: rows.length, shown: shown.length, html: summary + table,
+      note: noC7 ? (noC7.toLocaleString() + ' unit' + (noC7 === 1 ? '' : 's') + ' on routes not yet collected in Cycle 7') : '' };
+  }
 
   function render() {
     const host = $('mod-rip'); if (!host) return;
@@ -712,6 +859,8 @@
       return;
     }
 
+    if (state.cycle === 'c7' || state.tab === 'analysis') ensureC7();
+
     const secs = ripSections();
     const inScope = secs.filter((s) => s.in_scope).length;
     const metrics = availableMetrics();
@@ -720,11 +869,30 @@
     let tbl;
     if (state.tab === 'conditions') tbl = conditionsTable();
     else if (state.tab === 'geometry') tbl = geometryTable();
+    else if (state.tab === 'analysis') tbl = analysisTable();
     else if (state.tab === 'custom') tbl = customTable();
     else tbl = assetsTable();
 
-    const showFilters = state.tab !== 'custom';
+    const showFilters = state.tab !== 'custom' && state.tab !== 'analysis';
     const unit = state.tab === 'conditions' ? 'segments' : 'routes';
+
+    // Cycle selector state (drives the Conditions tab data source).
+    const C = window.RW2RIPCycle, cst = C && C.get();
+    const c7loaded = C && C.hasData() && C.park() === state.park;
+    const c7loading = cst && cst.loading && cst.park === state.park;
+    const c7err = cst && cst.error && cst.park === state.park;
+    const cov = c7loaded ? C.coverage([...state.segsByRoute.keys()]) : null;
+    const cycBtn = (c, l) => '<button data-cycle="' + c + '" style="border:1px solid ' + (state.cycle === c ? '#0B3D66' : '#cfd6dd')
+      + ';background:' + (state.cycle === c ? '#0B3D66' : '#fff') + ';color:' + (state.cycle === c ? '#fff' : '#33414f')
+      + ';padding:4px 12px;border-radius:7px;cursor:pointer;font:600 12px system-ui">' + l + '</button>';
+    const cycleRow = '<div style="display:flex;gap:7px;align-items:center;margin-top:9px;flex-wrap:wrap">'
+      + '<span style="font-size:12px;color:#8a949f">Condition data</span>' + cycBtn('c6', 'Cycle 6') + cycBtn('c7', 'Cycle 7')
+      + (state.cycle === 'c7' ? (
+        c7loading ? '<span style="font-size:12px;color:#b26a00">Loading Cycle 7…</span>'
+          : c7err ? '<span style="font-size:12px;color:#c0392b">Cycle 7 error</span> <button data-cycle-refresh="1" style="border:1px solid #d3dae1;background:#fff;border-radius:7px;padding:2px 9px;cursor:pointer;font:600 11px system-ui;color:#5b6673">Retry</button>'
+            : c7loaded ? '<span style="font-size:12px;color:' + (cov.routesWithC7 < cov.totalRoutes ? '#b26a00' : '#0e7c66') + '">' + cov.routesWithC7 + ' of ' + cov.totalRoutes + ' routes collected</span> <button data-cycle-refresh="1" style="border:1px solid #d3dae1;background:#fff;border-radius:7px;padding:2px 9px;cursor:pointer;font:600 11px system-ui;color:#5b6673">↻ Refresh</button>'
+              : '') : '')
+      + '</div>';
 
     host.innerHTML =
       '<div style="max-width:1240px;margin:0 auto;padding:16px 16px 40px;font-family:system-ui">'
@@ -734,7 +902,8 @@
       + '<div style="font-size:24px;font-weight:800;color:#12233b;line-height:1.1">' + esc(state.park)
       + ' <span style="font-size:14px;font-weight:600;color:#8a949f">' + esc((state.bundle.states || []).join(', ')) + '</span></div>'
       + '<div style="font-size:13px;color:#5b6673;margin-top:3px">' + secs.length + ' routes &amp; lots · '
-      + state.segments.length.toLocaleString() + ' segments at 0.02 mi · <b style="color:#0e7c66">' + inScope + '</b> in scope</div></div>'
+      + state.segments.length.toLocaleString() + ' segments at 0.02 mi · <b style="color:#0e7c66">' + inScope + '</b> in scope</div>'
+      + cycleRow + '</div>'
       + '<div style="display:flex;gap:8px">'
       + '<button id="rip-btn-import" style="border:1px solid #d3dae1;background:#fff;border-radius:9px;padding:8px 13px;cursor:pointer;font-weight:600;color:#12233b">Import park…</button>'
       + '<button id="rip-btn-map" style="border:0;background:#1a73e8;color:#fff;border-radius:9px;padding:8px 13px;cursor:pointer;font-weight:600">🗺 Map</button></div></div>'
@@ -765,7 +934,13 @@
       + '<div style="display:flex;gap:6px">' + TABS.map(([t, l]) =>
         '<button data-tab="' + t + '" style="border:1px solid #e3e8ee;border-bottom:1px solid ' + (state.tab === t ? '#fff' : '#e3e8ee') + ';background:'
         + (state.tab === t ? '#fff' : '#eef1f4') + ';color:#12233b;border-radius:10px 10px 0 0;padding:8px 15px;cursor:pointer;font:700 13px system-ui;position:relative;top:1px">' + l + '</button>').join('') + '</div>'
-      + '<div style="display:flex;gap:6px;padding-bottom:5px">'
+      + '<div style="display:flex;gap:6px;padding-bottom:5px;align-items:center">'
+      + (state.tab === 'analysis' ? '<span style="font-size:12px;color:#8a949f">Metric</span>'
+          + '<select id="rip-anal-metric" style="border:1px solid #d3dae1;border-radius:8px;padding:4px 7px;font:12.5px system-ui;background:#fff">'
+          + CYCLE_METRICS.map((k) => '<option value="' + k + '"' + (k === state.analMetric ? ' selected' : '') + '>' + esc(meta(k).l) + '</option>').join('') + '</select>'
+          + '<span style="font-size:12px;color:#8a949f;margin-left:4px">Every</span>'
+          + '<button data-anal-res="0.1" style="border:1px solid ' + (state.analRes === 0.1 ? '#0B3D66' : '#cfd6dd') + ';background:' + (state.analRes === 0.1 ? '#0B3D66' : '#fff') + ';color:' + (state.analRes === 0.1 ? '#fff' : '#33414f') + ';padding:4px 9px;border-radius:7px;cursor:pointer;font:600 11.5px system-ui">0.1 mi</button>'
+          + '<button data-anal-res="0.02" style="border:1px solid ' + (state.analRes === 0.02 ? '#0B3D66' : '#cfd6dd') + ';background:' + (state.analRes === 0.02 ? '#0B3D66' : '#fff') + ';color:' + (state.analRes === 0.02 ? '#fff' : '#33414f') + ';padding:4px 9px;border-radius:7px;cursor:pointer;font:600 11.5px system-ui">0.02 mi</button>' : '')
       + (state.tab === 'conditions' ? '<button id="rip-expand-all" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">Expand all</button>'
           + '<button id="rip-collapse-all" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">Collapse all</button>' : '')
       + (state.tab === 'custom' ? '<button id="rip-cust-add" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">+ Field</button>' : '')
@@ -777,7 +952,7 @@
       + '<div style="max-height:60vh;overflow:auto">' + tbl.html + '</div>'
       + (tbl.total !== undefined ?
         '<div style="padding:9px 13px;border-top:1px solid #eef1f4;display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:#5b6673">'
-        + '<span>Showing <b>' + tbl.shown.toLocaleString() + '</b> of <b>' + tbl.total.toLocaleString() + '</b>' + (tbl.unit ? ' ' + tbl.unit : '') + '</span>'
+        + '<span>Showing <b>' + tbl.shown.toLocaleString() + '</b> of <b>' + tbl.total.toLocaleString() + '</b>' + (tbl.unit ? ' ' + tbl.unit : '') + (tbl.note ? ' · <span style="color:#b26a00">' + esc(tbl.note) + '</span>' : '') + '</span>'
         + (tbl.shown < tbl.total ? '<button id="rip-more" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 13px;cursor:pointer;font:600 12.5px system-ui;color:#12233b">Show more</button>' : '<span style="color:#b8c0c8">end of list</span>')
         + '</div>' : '')
       + '</div></div>';
@@ -815,6 +990,25 @@
       state.expanded = new Set(g.keys()); state.limit = PAGE; render();
     };
     const colAll = $('rip-collapse-all'); if (colAll) colAll.onclick = () => { state.expanded.clear(); state.limit = PAGE; render(); };
+
+    // cycle selector + Cycle-7 refresh
+    host.querySelectorAll('[data-cycle]').forEach((b) => b.onclick = () => set(() => { state.cycle = b.dataset.cycle; }));
+    const cyR = host.querySelector('[data-cycle-refresh]');
+    if (cyR) cyR.onclick = () => { if (window.RW2RIPCycle) window.RW2RIPCycle.loadPark(state.park, { refresh: true, onchange: () => render() }); render(); };
+    // analysis controls
+    const am = $('rip-anal-metric'); if (am) am.onchange = () => set(() => { state.analMetric = am.value; });
+    host.querySelectorAll('[data-anal-res]').forEach((b) => b.onclick = () => set(() => { state.analRes = Number(b.dataset.analRes); }));
+    host.querySelectorAll('[data-asort]').forEach((h) => h.onclick = () => set(() => {
+      const k = h.dataset.asort; if (state.sort.key === k) state.sort.dir *= -1; else state.sort = { key: k, dir: 1 };
+    }));
+    const aLoad = $('rip-anal-load'); if (aLoad) aLoad.onclick = () => { if (window.RW2RIPCycle) window.RW2RIPCycle.loadPark(state.park, { refresh: true, onchange: () => render() }); render(); };
+    host.querySelectorAll('[data-pw-seg]').forEach((b) => b.onclick = (e) => {
+      e.stopPropagation();
+      const [id, mp] = b.dataset.pwSeg.split('|');
+      const sec = sections().find((s) => s.id === id); if (!sec || !window.RW2Pathweb) return;
+      const seg = (state.segsByRoute.get(sec.route_id) || []).find((x) => x.BEG_MP === Number(mp));
+      if (seg) window.RW2Pathweb.openSegment(seg, sec); else window.RW2Pathweb.openRoute(sec, state.segsByRoute.get(sec.route_id) || []);
+    });
 
     host.querySelectorAll('[data-exp]').forEach((tr) => tr.onclick = (e) => {
       if (e.target.closest('[data-nodetail]')) return;
