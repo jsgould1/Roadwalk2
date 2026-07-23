@@ -28,9 +28,10 @@
   const MINZOOM = { 0.1: 12, 0.02: 14 };
   const MAXPATHS = 6000;
   const PANE = 'ripBands';
-  // Overlay opacity — low enough to read the pavement through the colour.
-  // Lot outlines get a little more so the boundary still reads.
-  const BAND_OPACITY = 0.25;
+  // Bands render ABOVE overlayPane (400) so the black section outlines don't
+  // sit on top of and dull the colour, but below markerPane (600) so route
+  // labels stay readable over them.
+  const PANE_Z = 450;
 
   // Metrics offered. `k` is the Cycle 6 field name; Cycle 7 is mapped to the
   // same keys by rip-cycle.js. Parking only has PCR.
@@ -53,6 +54,7 @@
     open: false, mode: 'off',            // off | value | change
     cycle: 'c6', metric: 'PCR', res: 0.1,
     roads: true, parking: true,
+    opacity: 0.85,                       // user-adjustable in the panel
     capped: false, cache: {}, cachePark: null, scaleMax: 20,
   };
 
@@ -214,24 +216,35 @@
           + '<td style="text-align:right;padding:2px 0 2px 6px;font-weight:700;color:' + dc + ';font-variant-numeric:tabular-nums">' + dTxt(v.d) + '</td></tr>';
       }).join('') + '</table>';
   }
-  function showHover(html, ev) {
-    const el = hoverBox();
-    el.innerHTML = html;
-    el.style.display = 'block';
+  function placeHover(ev) {
+    const el = hoverEl; if (!el || el.style.display === 'none') return;
     const oe = ev && ev.originalEvent;
     const x = oe ? oe.clientX : 40, y = oe ? oe.clientY : 40;
     const w = el.offsetWidth || 230, h = el.offsetHeight || 140;
     el.style.left = Math.min(window.innerWidth - w - 10, x + 16) + 'px';
     el.style.top = Math.max(8, Math.min(window.innerHeight - h - 10, y - h / 2)) + 'px';
   }
+  // Building the comparison table is expensive (every metric, both cycles), so
+  // it happens once on mouseover; mousemove only repositions the box. Doing the
+  // rebuild per mousemove locked the page on dense parks.
+  function showHover(html, ev) {
+    const el = hoverBox();
+    el.innerHTML = html;
+    el.style.display = 'block';
+    placeHover(ev);
+  }
   const hideHover = () => { if (hoverEl) hoverEl.style.display = 'none'; };
 
+  // Cached per band, invalidated whenever a redraw changes what's shown.
   function bandHover(band) {
+    if (band._hov && band._hov.v === state.hoverVer) return band._hov.html;
     const rows = HOVER_METRICS.map((k) => [metricDef(k).l, bandValues(band, k)]);
     const iri = bandValues(band, 'IRI_AVG');
     if (iri.c6 != null || iri.c7 != null) rows.push(['IRI', iri]);
-    return cmpTable(band.rid, band.begMp.toFixed(2) + '–' + band.endMp.toFixed(2) + ' mi'
+    const html = cmpTable(band.rid, band.begMp.toFixed(2) + '–' + band.endMp.toFixed(2) + ' mi'
       + (band.members ? '  (0.1 mi mean of ' + band.members.length + ')' : ''), rows);
+    band._hov = { v: state.hoverVer, html };
+    return html;
   }
   function lotHover(sec) {
     return cmpTable(sec.route_id || sec.name, (sec.name || '') + ' · parking',
@@ -245,17 +258,26 @@
   function draw() {
     const m = getMap(), R = RIP();
     if (!m || !R || !R.hasPark()) { clear(); paint(); return; }
-    if (!m.getPane(PANE)) { m.createPane(PANE); m.getPane(PANE).style.zIndex = 350; }
+    if (!m.getPane(PANE)) { m.createPane(PANE); }
+    m.getPane(PANE).style.zIndex = PANE_Z;
     clear();
     state.capped = false;
+    state.gated = false;
+    state.hoverVer = (state.hoverVer || 0) + 1;   // invalidate cached hover tables
     if (state.mode === 'off') { paint(); return; }
-    // Cycle 7 / change need the live data
+    // Cycle 7 / change need the live data. Guard against re-entry: loadPark's
+    // onchange calls draw() again, so only kick one off when nothing is in
+    // flight for this park.
     if ((state.cycle === 'c7' || state.mode === 'change') && CYC() && !c7Ready()) {
-      CYC().loadPark(R.state.park, { onchange: () => { draw(); } });
+      const cst = CYC().get();
+      if (!(cst && cst.loading && cst.park === R.state.park)) {
+        CYC().loadPark(R.state.park, { onchange: () => { draw(); } });
+      }
     }
 
     const zoom = m.getZoom();
-    if (state.roads && zoom < MINZOOM[state.res]) { paint(); return; }
+    // Zoom-gated: mark it so the keep-alive interval doesn't retry every second.
+    if (state.roads && zoom < MINZOOM[state.res]) { state.gated = true; paint(); return; }
     const b = m.getBounds().pad(0.25);
     const bs = b.getSouth(), bw = b.getWest(), bn = b.getNorth(), be = b.getEast();
     layer = L.layerGroup([], { pane: PANE });
@@ -287,10 +309,10 @@
         const col = colorOf(v, max);
         if (!col) continue;
         for (const pts of band.parts) {
-          const pl = L.polyline(pts, { pane: PANE, color: col, weight: 6, opacity: BAND_OPACITY,
+          const pl = L.polyline(pts, { pane: PANE, color: col, weight: 6, opacity: state.opacity,
             lineCap: 'butt', interactive: true, bubblingMouseEvents: false });
           pl.on('mouseover', (e) => showHover(bandHover(band), e));
-          pl.on('mousemove', (e) => showHover(bandHover(band), e));
+          pl.on('mousemove', placeHover);
           pl.on('mouseout', hideHover);
           pl.addTo(layer);
           if (++n >= MAXPATHS) { state.capped = true; break; }
@@ -309,10 +331,10 @@
         if (!col) continue;
         const rings = (sec.holes && sec.holes.length) ? [sec.alignment].concat(sec.holes) : sec.alignment;
         const pg = L.polygon(rings, { pane: PANE, color: col, weight: 2, fillColor: col,
-          fillOpacity: BAND_OPACITY, opacity: Math.min(1, BAND_OPACITY + 0.35),
+          fillOpacity: state.opacity * 0.8, opacity: Math.min(1, state.opacity + 0.15),
           interactive: true, bubblingMouseEvents: false });
         pg.on('mouseover', (e) => showHover(lotHover(sec), e));
-        pg.on('mousemove', (e) => showHover(lotHover(sec), e));
+        pg.on('mousemove', placeHover);
         pg.on('mouseout', hideHover);
         pg.addTo(layer);
         if (++n >= MAXPATHS) { state.capped = true; break; }
@@ -398,6 +420,14 @@
     const m = getMap(), zoom = m ? m.getZoom() : 0;
     const gated = state.mode !== 'off' && state.roads && zoom < MINZOOM[state.res];
     const c7 = c7Ready();
+    // The keep-alive interval calls paint() every second; rebuilding the panel
+    // that often fights any control the user is mid-interaction with (the
+    // opacity slider especially), so only rebuild when something actually changed.
+    const sig = [state.mode, state.cycle, state.metric, state.res, state.roads, state.parking,
+      state.opacity, state.capped, gated, c7, state.scaleMax, zoom].join('|');
+    if (sig === state._sig) return;
+    state._sig = sig;
+
     const badge = state.mode === 'off' ? ['Off', '#8a949f', '#eef1f4']
       : state.mode === 'change' ? ['Change C6 → C7', '#fff', '#6a3d9a']
         : state.cycle === 'c7' ? ['Cycle 7 data', '#fff', '#0B3D66'] : ['Cycle 6 data', '#fff', '#0e7c66'];
@@ -436,9 +466,13 @@
         + '</select>'
         + '<div style="display:flex;gap:4px;align-items:center;margin-bottom:6px"><span style="font:11px system-ui;color:#8a949f">Every</span>'
         + seg('0.1 mi', state.res === 0.1, 'data-res="0.1"') + seg('0.02 mi', state.res === 0.02, 'data-res="0.02"') + '</div>'
-        + '<div style="display:flex;gap:10px;font:11.5px system-ui;color:#3a4653;margin-bottom:2px">'
+        + '<div style="display:flex;gap:10px;font:11.5px system-ui;color:#3a4653;margin-bottom:4px">'
         + '<label style="display:flex;gap:4px;align-items:center;cursor:pointer"><input type="checkbox" id="rip-band-roads"' + (state.roads ? ' checked' : '') + '>Roads</label>'
         + '<label style="display:flex;gap:4px;align-items:center;cursor:pointer"><input type="checkbox" id="rip-band-parking"' + (state.parking ? ' checked' : '') + '>Parking</label></div>'
+        + '<div style="display:flex;gap:6px;align-items:center">'
+        + '<span style="font:11px system-ui;color:#8a949f">Opacity</span>'
+        + '<input type="range" id="rip-band-opacity" min="15" max="100" step="5" value="' + Math.round(state.opacity * 100) + '" style="flex:1;min-width:0">'
+        + '<span id="rip-band-op-val" style="font:11px system-ui;color:#5b6673;width:30px;text-align:right">' + Math.round(state.opacity * 100) + '%</span></div>'
         : '')
       + ((state.mode !== 'off' && (state.cycle === 'c7' || state.mode === 'change') && !c7) ? '<div style="font:11px system-ui;color:#b26a00;margin-top:5px">Loading Cycle 7…</div>' : '')
       + (gated ? '<div style="font:11px system-ui;color:#b26a00;margin-top:5px">Zoom in to show ' + state.res + ' mi bands</div>' : '')
@@ -455,6 +489,13 @@
     const ms = $('rip-band-metric'); if (ms) ms.onchange = () => { state.metric = ms.value; draw(); };
     const rd = $('rip-band-roads'); if (rd) rd.onchange = () => { state.roads = rd.checked; draw(); };
     const pk = $('rip-band-parking'); if (pk) pk.onchange = () => { state.parking = pk.checked; draw(); };
+    const op = $('rip-band-opacity');
+    if (op) {
+      // Live % readout while dragging; redraw on release so a long drag over a
+      // dense park doesn't rebuild thousands of paths per pixel.
+      op.oninput = () => { const v = $('rip-band-op-val'); if (v) v.textContent = op.value + '%'; };
+      op.onchange = () => { state.opacity = Number(op.value) / 100; draw(); };
+    }
   }
 
   // ---- boot -------------------------------------------------------------
@@ -466,7 +507,7 @@
       return;
     }
     if (mount()) { ensureWired(); paint(); }
-    if (state.mode !== 'off' && getMap() && !layer) draw();
+    if (state.mode !== 'off' && getMap() && !layer && !state.gated) draw();
   }, 1000);
 
   window.RW2RIPMap = {

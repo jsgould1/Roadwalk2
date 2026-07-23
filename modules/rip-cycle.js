@@ -49,13 +49,19 @@
   const FS_PARK = 'https://services3.arcgis.com/9Ij3DUv1U3250Rno/arcgis/rest/services/'
     + 'NPS_Presentation_Dashboard_April_2024_WFL1/FeatureServer/7/query';
 
-  const state = { park: null, all: [], byRoute: new Map(), parking: new Map(), fetchedAt: null, loading: false, error: null };
+  const state = { park: null, all: [], byRoute: new Map(), byKey: new Map(), parking: new Map(), fetchedAt: null, loading: false, error: null };
+  // Both cycles share the same 0.02 mi grid, so a segment can be keyed by
+  // route + milepost bin. matchSeg is called thousands of times per hover, so
+  // it must be an O(1) map lookup, never a scan.
+  const mpKey = (rid, mp) => rid + '|' + Math.round((mp || 0) * 50);
   function index() {
     state.byRoute = new Map();
+    state.byKey = new Map();
     for (const s of state.all) {
       let a = state.byRoute.get(s.ROUTE_IDENT);
       if (!a) state.byRoute.set(s.ROUTE_IDENT, a = []);
       a.push(s);
+      state.byKey.set(mpKey(s.ROUTE_IDENT, s.BEG_MP), s);
     }
     for (const a of state.byRoute.values()) a.sort((x, y) => (x.BEG_MP || 0) - (y.BEG_MP || 0));
   }
@@ -131,6 +137,10 @@
     opts = opts || {};
     if (!park) return state;
     if (state.park === park && state.all.length && !opts.refresh) return state;
+    // Already fetching this park: callers re-enter through their onchange
+    // handler, so without this a draw()->loadPark->onchange->draw() cycle
+    // recurses forever and hangs the tab.
+    if (state.park === park && state.loading) return state;
     state.loading = true; state.error = null; state.park = park;
     if (typeof opts.onchange === 'function') opts.onchange();
     try {
@@ -155,9 +165,7 @@
   }
 
   function matchSeg(routeIdent, begMp) {
-    const arr = state.byRoute.get(routeIdent); if (!arr) return null;
-    for (const s of arr) if (Math.abs((s.BEG_MP || 0) - begMp) < 0.001) return s;
-    return null;
+    return (state.byKey && state.byKey.get(mpKey(routeIdent, begMp))) || null;
   }
   // Coverage vs a set of Cycle 6 route idents.
   function coverage(routeIdents) {

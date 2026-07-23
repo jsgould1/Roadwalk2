@@ -103,9 +103,9 @@
 <script src="modules/aecom-toggle.js?v=2" defer></script>
 <script src="modules/rip-data.js?v=7" defer></script>
 <script src="modules/rip-import.js?v=2" defer></script>
-<script src="modules/rip-map.js?v=6" defer></script>
+<script src="modules/rip-map.js?v=9" defer></script>
 <script src="modules/rip-pathweb.js?v=2" defer></script>
-<script src="modules/rip-cycle.js?v=2" defer></script>
+<script src="modules/rip-cycle.js?v=4" defer></script>
 <script src="modules/scope-assign.js?v=5" defer></script>
 <script src="modules/sections-table.js" defer></script>
 <script src="modules/route-menu.js?v=7" defer></script>
@@ -13435,8 +13435,10 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     const css = selected
       ? 'background:#0B3D66;color:#fff;border:1px solid #0B3D66'
       : 'background:rgba(255,255,255,.82);color:#C85A2B;border:1px solid #C85A2B';
+    // markerPane (600) sits above the condition-band pane (450), so labels stay
+    // readable over the colouring instead of being covered by it.
     return L.marker([cLat, cLng], {
-      interactive: false, keyboard: false, pane: 'overlayPane',
+      interactive: false, keyboard: false, pane: 'markerPane',
       icon: L.divIcon({
         className: 'rw-routeid-label',
         html: `<div style="${css};font:700 11px 'IBM Plex Mono',monospace;padding:1px 6px;border-radius:6px;white-space:nowrap;transform:translate(-50%,-50%);box-shadow:0 1px 4px rgba(0,0,0,.25)">${rid}</div>`,
