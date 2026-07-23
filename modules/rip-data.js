@@ -91,31 +91,32 @@
   };
   const LOT_METRICS = ['PCR', 'CONDITION_RATING', 'FCI'];
 
-  // NPS RIP condition colour bands (confirmed with the user): blue = best →
-  // red = worst. Applied to PCR and every 0-100 index. IRI (roughness, in/mi)
-  // reuses the same 5 colours on its own thresholds since it is not a 0-100
-  // score. Values are nulled at -1 upstream, so a null here means "not
-  // measured" and gets no colour.
-  const BAND = { blue: '#2b7bba', dgreen: '#1a9850', lgreen: '#a6d96a', yellow: '#f6c700', red: '#d73027', none: '#c3cad2' };
-  // 0-100 score → band (higher is better): ≥90 / 80-89 / 70-79 / 60-69 / <60
+  // Official NPS RIP condition colour bands — taken verbatim from the EFLHD-RIP
+  // dashboard's own layer renderer (field RATING): EXCELLENT 95-100, GOOD
+  // 85-94, FAIR 61-84, POOR 0-60, NOT RATED. Applied to PCR and every 0-100
+  // index. IRI (roughness, in/mi) reuses the same colours on its own
+  // thresholds. -1 is nulled upstream, so null here = "not measured" (no
+  // colour). These exact breaks/hex match the official Cycle 7 dashboard.
+  const BAND = { excellent: '#0072b2', good: '#1b9e77', fair: '#e69f00', poor: '#c51b7d', nr: '#000000', none: '#c3cad2' };
+  // 0-100 score → band (higher is better)
   function scoreColor(v) {
     if (v == null || isNaN(v)) return null;
     v = Number(v);
-    return v >= 90 ? BAND.blue : v >= 80 ? BAND.dgreen : v >= 70 ? BAND.lgreen : v >= 60 ? BAND.yellow : BAND.red;
+    return v >= 95 ? BAND.excellent : v >= 85 ? BAND.good : v >= 61 ? BAND.fair : BAND.poor;
   }
-  // IRI in in/mi → band (lower is better)
+  // IRI in in/mi → band (lower is better), same palette
   function iriColor(v) {
     if (v == null || isNaN(v)) return null;
     v = Number(v);
-    return v < 60 ? BAND.blue : v < 95 ? BAND.dgreen : v < 135 ? BAND.lgreen : v < 170 ? BAND.yellow : BAND.red;
+    return v < 60 ? BAND.excellent : v < 95 ? BAND.good : v < 135 ? BAND.fair : BAND.poor;
   }
   const SCORE_FIELDS = new Set(['PCR', 'CONDITION_RATING', 'SCR', 'RCI', 'SC_INDEX',
     'AC_INDEX', 'LC_INDEX', 'TC_INDEX', 'PATCH_INDEX', 'RUT_INDEX', 'API']);
   // Colour a table cell's value by field: 0-100 scores use the RIP bands, IRI
   // its own scale; everything else (RUT_AVG, FCI, non-metrics) stays uncoloured.
   function cellColor(key, v) { return key === 'IRI_AVG' ? iriColor(v) : SCORE_FIELDS.has(key) ? scoreColor(v) : null; }
-  const SCORE_LEGEND = [['≥ 90', BAND.blue], ['80–89', BAND.dgreen], ['70–79', BAND.lgreen], ['60–69', BAND.yellow], ['< 60', BAND.red]];
-  const IRI_LEGEND = [['< 60', BAND.blue], ['60–95', BAND.dgreen], ['95–135', BAND.lgreen], ['135–170', BAND.yellow], ['≥ 170', BAND.red]];
+  const SCORE_LEGEND = [['95–100', BAND.excellent], ['85–94', BAND.good], ['61–84', BAND.fair], ['0–60', BAND.poor]];
+  const IRI_LEGEND = [['< 60', BAND.excellent], ['60–95', BAND.good], ['95–135', BAND.fair], ['≥ 135', BAND.poor]];
 
   // ---- default columns per tab ------------------------------------------
   const DEFAULT_COLS = {
@@ -422,16 +423,16 @@
   // A stacked bar showing what fraction of a route's length sits in each PCR
   // band — a quick condition fingerprint on the collapsed route row.
   function conditionBar(segs) {
-    const buckets = { blue: 0, dgreen: 0, lgreen: 0, yellow: 0, red: 0, none: 0 };
+    const buckets = { excellent: 0, good: 0, fair: 0, poor: 0, none: 0 };
     let tot = 0;
     for (const s of segs) {
       const len = s.INT_LENGTH || 105.6; tot += len;
       const v = s.PCR;
-      const k = v == null ? 'none' : v >= 90 ? 'blue' : v >= 80 ? 'dgreen' : v >= 70 ? 'lgreen' : v >= 60 ? 'yellow' : 'red';
+      const k = v == null ? 'none' : v >= 95 ? 'excellent' : v >= 85 ? 'good' : v >= 61 ? 'fair' : 'poor';
       buckets[k] += len;
     }
     if (!tot) return '';
-    const order = [['blue', BAND.blue], ['dgreen', BAND.dgreen], ['lgreen', BAND.lgreen], ['yellow', BAND.yellow], ['red', BAND.red], ['none', BAND.none]];
+    const order = [['excellent', BAND.excellent], ['good', BAND.good], ['fair', BAND.fair], ['poor', BAND.poor], ['none', BAND.none]];
     return '<span title="PCR distribution by length" style="display:inline-flex;width:94px;height:10px;border-radius:3px;overflow:hidden;border:1px solid #dfe4ea;flex:0 0 auto">'
       + order.map(([k, c]) => buckets[k] ? '<span style="width:' + (100 * buckets[k] / tot).toFixed(2) + '%;background:' + c + '"></span>' : '').join('') + '</span>';
   }
@@ -630,10 +631,11 @@
       + '<button id="rip-drawer-map" style="flex:1;border:0;background:#1a73e8;color:#fff;border-radius:9px;padding:9px;cursor:pointer;font-weight:700">🗺 Show on map</button>'
       + '<button id="rip-drawer-scope" style="border:1px solid #d3dae1;background:#fff;border-radius:9px;padding:9px 13px;cursor:pointer;font-weight:600;color:#12233b">' + (sec.in_scope ? 'Remove scope' : 'Set in scope') + '</button></div>';
     document.body.appendChild(d);
-    // Milepost for the PathWeb frame: the open segment's midpoint, else route start.
-    const pwMile = seg ? ((seg.BEG_MP + seg.END_MP) / 2) : (a.BEG_MP_DCV || 0);
     $('rip-drawer-x').onclick = () => d.remove();
-    const pw = $('rip-drawer-pw'); if (pw) pw.onclick = () => window.RW2Pathweb.open(sec, pwMile, 'c6');
+    const pw = $('rip-drawer-pw'); if (pw) pw.onclick = () => {
+      if (seg) window.RW2Pathweb.openSegment(seg, sec);
+      else window.RW2Pathweb.openRoute(sec, state.segsByRoute.get(sec.route_id) || []);
+    };
     $('rip-drawer-map').onclick = () => { if (RW().showView) RW().showView('field', sec.id); if (window.showModule) window.showModule('map'); d.remove(); };
     $('rip-drawer-scope').onclick = () => {
       sec.in_scope = !sec.in_scope;
@@ -837,9 +839,7 @@
     host.querySelectorAll('[data-pw]').forEach((b) => b.onclick = (e) => {
       e.stopPropagation();
       const sec = sections().find((s) => s.id === b.dataset.pw); if (!sec || !window.RW2Pathweb) return;
-      const segs = state.segsByRoute.get(sec.route_id) || [];
-      const mile = segs.length ? ((segs[0].BEG_MP + segs[0].END_MP) / 2) : (ripOf(sec).BEG_MP_DCV || 0);
-      window.RW2Pathweb.open(sec, mile, 'c6');
+      window.RW2Pathweb.openRoute(sec, state.segsByRoute.get(sec.route_id) || []);
     });
     host.querySelectorAll('[data-detail]').forEach((tr) => tr.onclick = (e) => {
       if (e.target.closest('[data-nodetail]') || e.target.tagName === 'INPUT') return;

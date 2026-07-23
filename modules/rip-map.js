@@ -32,19 +32,21 @@
   // Single source of truth is the RIP data module's NPS condition bands
   // (blue best → red worst, confirmed with the user). Fall back to a local
   // copy only if that module somehow isn't loaded yet.
-  const FALLBACK_BAND = { blue: '#2b7bba', dgreen: '#1a9850', lgreen: '#a6d96a', yellow: '#f6c700', red: '#d73027' };
+  // Official NPS RIP bands (EFLHD-RIP dashboard renderer). rip-data.js is the
+  // source of truth; this fallback mirrors it if that module isn't loaded yet.
+  const FALLBACK_BAND = { excellent: '#0072b2', good: '#1b9e77', fair: '#e69f00', poor: '#c51b7d' };
   function pcrColor(v) {
     if (RIP() && RIP().scoreColor) return RIP().scoreColor(v);
     if (v == null || isNaN(v)) return null;
-    return v >= 90 ? FALLBACK_BAND.blue : v >= 80 ? FALLBACK_BAND.dgreen : v >= 70 ? FALLBACK_BAND.lgreen : v >= 60 ? FALLBACK_BAND.yellow : FALLBACK_BAND.red;
+    return v >= 95 ? FALLBACK_BAND.excellent : v >= 85 ? FALLBACK_BAND.good : v >= 61 ? FALLBACK_BAND.fair : FALLBACK_BAND.poor;
   }
   function iriColor(v) {
     if (RIP() && RIP().iriColor) return RIP().iriColor(v);
     if (v == null || isNaN(v)) return null;
-    return v < 60 ? FALLBACK_BAND.blue : v < 95 ? FALLBACK_BAND.dgreen : v < 135 ? FALLBACK_BAND.lgreen : v < 170 ? FALLBACK_BAND.yellow : FALLBACK_BAND.red;
+    return v < 60 ? FALLBACK_BAND.excellent : v < 95 ? FALLBACK_BAND.good : v < 135 ? FALLBACK_BAND.fair : FALLBACK_BAND.poor;
   }
   const legendFor = (metric) => (RIP() && RIP().legend ? RIP().legend(metric)
-    : metric === 'IRI' ? [['<60', FALLBACK_BAND.blue], ['≥170', FALLBACK_BAND.red]] : [['≥90', FALLBACK_BAND.blue], ['<60', FALLBACK_BAND.red]]);
+    : metric === 'IRI' ? [['<60', FALLBACK_BAND.excellent], ['≥135', FALLBACK_BAND.poor]] : [['95–100', FALLBACK_BAND.excellent], ['0–60', FALLBACK_BAND.poor]]);
   const colorFor = (metric, v) => (metric === 'IRI' ? iriColor(v) : pcrColor(v));
   const metricVal = (band, metric) => (metric === 'IRI' ? band.iri : band.pcr);
 
