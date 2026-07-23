@@ -13083,7 +13083,13 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
             const bb = L.latLngBounds(al);
             (sec.holes || []).forEach((h) => (h || []).forEach((p) => bb.extend(p)));
             if (bb.isValid()) {
-              state.map.fitBounds(bb, { padding: [40, 40], maxZoom: 18 });
+              // Fit the route, but clamp to a usable working scale: a long
+              // route otherwise fits at a zoom far too wide to inspect, and
+              // fitBounds' integer rounding costs another level on top.
+              const ROUTE_ZOOM_MIN = 16, ROUTE_ZOOM_MAX = 19;
+              let z = state.map.getBoundsZoom(bb, false, L.point(12, 12));
+              z = Math.max(ROUTE_ZOOM_MIN, Math.min(ROUTE_ZOOM_MAX, z));
+              state.map.setView(bb.getCenter(), z);
               fitted = true;
             }
           } catch (_) {}
@@ -13425,23 +13431,28 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       default: return rid;
     }
   }
-  function _routeIdLabel(sec, selected) {
+  // dx/dy nudge the chip off the geometry (see _renderRouteLabels), so the
+  // label sits beside its line/polygon rather than on top of it.
+  function _routeIdLabel(sec, selected, dx, dy) {
     const al = sec && sec.alignment;
     if (!Array.isArray(al) || !al.length) return null;
     const rid = _labelText(sec);
     if (!rid) return null;
     const cLat = al.reduce((a, p) => a + p[0], 0) / al.length;
     const cLng = al.reduce((a, p) => a + p[1], 0) / al.length;
+    // Black on translucent white — reads over both imagery and the condition
+    // bands without competing with either.
     const css = selected
-      ? 'background:#0B3D66;color:#fff;border:1px solid #0B3D66'
-      : 'background:rgba(255,255,255,.82);color:#C85A2B;border:1px solid #C85A2B';
+      ? 'background:rgba(255,255,255,.94);color:#000;border:1.2px solid #000'
+      : 'background:rgba(255,255,255,.86);color:#111;border:1px solid #111';
+    const tx = `translate(calc(-50% + ${Math.round(dx || 0)}px), calc(-50% + ${Math.round(dy || 0)}px))`;
     // markerPane (600) sits above the condition-band pane (450), so labels stay
     // readable over the colouring instead of being covered by it.
     return L.marker([cLat, cLng], {
       interactive: false, keyboard: false, pane: 'markerPane',
       icon: L.divIcon({
         className: 'rw-routeid-label',
-        html: `<div style="${css};font:700 11px 'IBM Plex Mono',monospace;padding:1px 6px;border-radius:6px;white-space:nowrap;transform:translate(-50%,-50%);box-shadow:0 1px 4px rgba(0,0,0,.25)">${rid}</div>`,
+        html: `<div style="${css};font:700 9.5px 'IBM Plex Mono',monospace;padding:1px 4px;border-radius:5px;white-space:nowrap;transform:${tx};box-shadow:0 1px 3px rgba(0,0,0,.22)">${rid}</div>`,
         iconSize: null, iconAnchor: [0, 0],
       }),
     });
@@ -13523,6 +13534,14 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   // placed at the current zoom. Only labels whose anchor is in view are
   // considered, and the total is capped so a 1900-route park stays responsive.
   let _labelCands = [];
+  // Candidate nudges (px) tried in order — straight off the line first, then
+  // diagonals, then progressively further out. The centroid itself is last.
+  const LABEL_OFFSETS = [
+    [0, -15], [0, 15], [20, 0], [-20, 0],
+    [17, -13], [-17, -13], [17, 13], [-17, 13],
+    [0, -28], [0, 28], [34, 0], [-34, 0],
+    [0, 0],
+  ];
   function _renderRouteLabels() {
     if (state.mapLayers.subLabels) {
       try { state.mapLayers.subLabels.remove(); } catch (_) {}
@@ -13543,15 +13562,37 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       const txt = _labelText(c.sec);
       if (!txt) continue;
       let pt; try { pt = state.map.latLngToContainerPoint([cLat, cLng]); } catch (_) { continue; }
-      const w = txt.length * 6.6 + 14, h = 17;
-      const r = { x1: pt.x - w / 2, y1: pt.y - h / 2, x2: pt.x + w / 2, y2: pt.y + h / 2 };
-      let clash = false;
-      for (const p of placed) {
-        if (!(r.x2 < p.x1 || r.x1 > p.x2 || r.y2 < p.y1 || r.y1 > p.y2)) { clash = true; break; }
+      const w = txt.length * 5.9 + 10, h = 14;
+
+      // Sample this section's own geometry in screen space so the chip can be
+      // pushed off its line/polygon instead of sitting on top of it.
+      const geo = [];
+      const step = Math.max(1, Math.floor(al.length / 28));
+      for (let i = 0; i < al.length; i += step) {
+        try { geo.push(state.map.latLngToContainerPoint(al[i])); } catch (_) {}
       }
-      if (clash) continue;
-      const lbl = _routeIdLabel(c.sec, c.selected);
-      if (lbl) { placed.push(r); grp.addLayer(lbl); count++; }
+      const rectAt = (dx, dy) => ({
+        x1: pt.x + dx - w / 2, y1: pt.y + dy - h / 2,
+        x2: pt.x + dx + w / 2, y2: pt.y + dy + h / 2,
+      });
+      const hitsPlaced = (r) => placed.some((p) =>
+        !(r.x2 < p.x1 || r.x1 > p.x2 || r.y2 < p.y1 || r.y1 > p.y2));
+      const hitsGeom = (r) => geo.some((g) =>
+        g.x >= r.x1 - 1 && g.x <= r.x2 + 1 && g.y >= r.y1 - 1 && g.y <= r.y2 + 1);
+
+      // Try offsets around the anchor; prefer clear of both, then merely clear
+      // of other labels, and give up rather than stack chips on each other.
+      let chosen = null, fallback = null;
+      for (const [dx, dy] of LABEL_OFFSETS) {
+        const r = rectAt(dx, dy);
+        if (hitsPlaced(r)) continue;
+        if (!hitsGeom(r)) { chosen = { dx, dy, r }; break; }
+        if (!fallback) fallback = { dx, dy, r };
+      }
+      const pick = chosen || fallback;
+      if (!pick) continue;
+      const lbl = _routeIdLabel(c.sec, c.selected, pick.dx, pick.dy);
+      if (lbl) { placed.push(pick.r); grp.addLayer(lbl); count++; }
     }
     if (count) { grp.addTo(state.map); state.mapLayers.subLabels = grp; }
   }
@@ -13733,6 +13774,18 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       const opSlider = document.getElementById('basemap-opacity');
       if (opSlider && typeof layer.setOpacity === 'function') {
         layer.setOpacity(parseFloat(opSlider.value));
+      }
+      // A present Nearmap key does not mean Nearmap actually serves tiles here
+      // (expired key, no coverage for this park). Watch for tile failures and
+      // fall back to Esri Aerial rather than leaving the user on a blank map.
+      if (key === 'nearmap' && !state.settings.basemapChosen && typeof layer.on === 'function') {
+        let bad = 0;
+        layer.on('tileerror', () => {
+          if (++bad < 4 || state.settings.basemap !== 'nearmap') return;
+          layer.off('tileerror');
+          console.warn('[RoadWalk] Nearmap tiles unavailable — falling back to Esri Aerial.');
+          setBasemap('esri_aerial');
+        });
       }
     }
     state.settings.basemap = key;
