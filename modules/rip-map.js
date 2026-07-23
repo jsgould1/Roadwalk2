@@ -1,18 +1,21 @@
 /* =========================================================================
- * rip-map.js — condition colour bands on the map for an imported RIP park.
+ * rip-map.js — condition colouring on the map for an imported RIP park.
  *
- * Draws the 0.02 mi (or aggregated 0.1 mi) condition segments as coloured
- * bands along the route centerlines, toggled between PCR (PCI-style 0-100)
- * and IRI (measured roughness). A floating control on the map switches
- * metric and resolution.
+ * Collapsed to a single icon button on the map's left stack (a quartered
+ * circle in the official condition colours) so it never covers the imagery;
+ * clicking it opens the panel.
  *
- * Performance: a big park has 26k segments, so bands are
- *   - zoom-gated (nothing below a per-resolution minimum zoom),
- *   - viewport-culled (only segments whose bbox meets the padded view), and
- *   - hard-capped, with the control saying when the cap bit.
- * The 0.1 mi view is AGGREGATED from the 0.02 mi data (5 sub-segments,
- * length-weighted mean) — it is a display simplification, not NPS's own
- * 0.1 mi values, which were dropped as redundant to the 0.02 mi layer.
+ * Shows either a VALUE (Cycle 6 or Cycle 7) or the CHANGE between cycles:
+ *   - roads    0.02 mi segments, or an 0.1 mi length-weighted rollup, drawn
+ *              along the centerline
+ *   - parking  lot polygons (PCR only — Cycle 6 lots carry no per-index data)
+ * Cycle 7 has no geometry of its own; it is matched onto Cycle 6 geometry by
+ * ROUTE_IDENT + BEG_MP, which is valid because both use the same 0.02 mi grid.
+ *
+ * Hovering any band or lot shows a Cycle 6 / Cycle 7 / Change comparison.
+ *
+ * Performance for a park like BLRI (26k segments): zoom-gated, viewport-culled
+ * by per-band bbox, and capped at a fixed number of drawn paths.
  * ========================================================================= */
 (function () {
   'use strict';
@@ -20,40 +23,92 @@
   const RW = () => window._RW || {};
   const getMap = () => (RW().getMap ? RW().getMap() : null);
   const RIP = () => window.RW2RIP;
+  const CYC = () => window.RW2RIPCycle;
 
   const MINZOOM = { 0.1: 12, 0.02: 14 };
-  const MAXPATHS = 8000;   // cap on Leaflet polylines drawn per render, so a
-                           // 0.1 mi band's ~5 parts count individually
+  const MAXPATHS = 6000;
   const PANE = 'ripBands';
 
-  const state = { metric: null, res: 0.1, capped: false, cache: {}, cachePark: null };
+  // Metrics offered. `k` is the Cycle 6 field name; Cycle 7 is mapped to the
+  // same keys by rip-cycle.js. Parking only has PCR.
+  const METRICS = [
+    { k: 'PCR', l: 'PCR', kind: 'score', parking: true },
+    { k: 'SC_INDEX', l: 'Surface', kind: 'score' },
+    { k: 'AC_INDEX', l: 'Alligator', kind: 'score' },
+    { k: 'LC_INDEX', l: 'Longitudinal', kind: 'score' },
+    { k: 'TC_INDEX', l: 'Transverse', kind: 'score' },
+    { k: 'PATCH_INDEX', l: 'Patching', kind: 'score' },
+    { k: 'RUT_INDEX', l: 'Rutting', kind: 'score' },
+    { k: 'RCI', l: 'Roughness (RCI)', kind: 'score' },
+    { k: 'IRI_AVG', l: 'IRI (C6 only)', kind: 'iri' },
+  ];
+  const metricDef = (k) => METRICS.find((m) => m.k === k) || METRICS[0];
+  // Metrics shown in the hover comparison table.
+  const HOVER_METRICS = ['PCR', 'SC_INDEX', 'AC_INDEX', 'LC_INDEX', 'TC_INDEX', 'PATCH_INDEX', 'RUT_INDEX', 'RCI'];
 
-  // ---- colour scales ----------------------------------------------------
-  // Single source of truth is the RIP data module's NPS condition bands
-  // (blue best → red worst, confirmed with the user). Fall back to a local
-  // copy only if that module somehow isn't loaded yet.
-  // Official NPS RIP bands (EFLHD-RIP dashboard renderer). rip-data.js is the
-  // source of truth; this fallback mirrors it if that module isn't loaded yet.
-  const FALLBACK_BAND = { excellent: '#0072b2', good: '#1b9e77', fair: '#e69f00', poor: '#c51b7d' };
-  function pcrColor(v) {
+  const state = {
+    open: false, mode: 'off',            // off | value | change
+    cycle: 'c6', metric: 'PCR', res: 0.1,
+    roads: true, parking: true,
+    capped: false, cache: {}, cachePark: null, scaleMax: 20,
+  };
+
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  // ---- colours ----------------------------------------------------------
+  const FALLBACK = { excellent: '#0072b2', good: '#1b9e77', fair: '#e69f00', poor: '#c51b7d' };
+  function scoreColor(v) {
     if (RIP() && RIP().scoreColor) return RIP().scoreColor(v);
     if (v == null || isNaN(v)) return null;
-    return v >= 95 ? FALLBACK_BAND.excellent : v >= 85 ? FALLBACK_BAND.good : v >= 61 ? FALLBACK_BAND.fair : FALLBACK_BAND.poor;
+    return v >= 95 ? FALLBACK.excellent : v >= 85 ? FALLBACK.good : v >= 61 ? FALLBACK.fair : FALLBACK.poor;
   }
   function iriColor(v) {
     if (RIP() && RIP().iriColor) return RIP().iriColor(v);
     if (v == null || isNaN(v)) return null;
-    return v < 60 ? FALLBACK_BAND.excellent : v < 95 ? FALLBACK_BAND.good : v < 135 ? FALLBACK_BAND.fair : FALLBACK_BAND.poor;
+    return v < 60 ? FALLBACK.excellent : v < 95 ? FALLBACK.good : v < 135 ? FALLBACK.fair : FALLBACK.poor;
   }
-  const legendFor = (metric) => (RIP() && RIP().legend ? RIP().legend(metric)
-    : metric === 'IRI' ? [['<60', FALLBACK_BAND.excellent], ['≥135', FALLBACK_BAND.poor]] : [['95–100', FALLBACK_BAND.excellent], ['0–60', FALLBACK_BAND.poor]]);
-  const colorFor = (metric, v) => (metric === 'IRI' ? iriColor(v) : pcrColor(v));
-  const metricVal = (band, metric) => (metric === 'IRI' ? band.iri : band.pcr);
+  function valueColor(v) { return metricDef(state.metric).kind === 'iri' ? iriColor(v) : scoreColor(v); }
+  // Diverging green↔red for change, scaled to the data actually on screen.
+  function changeColor(d, max) {
+    if (d == null || isNaN(d)) return null;
+    const m = Math.max(5, max || state.scaleMax);
+    const t = Math.max(-1, Math.min(1, d / m));
+    const mix = (a, b, f) => a.map((x, i) => Math.round(x + (b[i] - x) * f));
+    const base = [242, 244, 246];
+    const rgb = t >= 0 ? mix(base, [12, 120, 60], t) : mix(base, [200, 30, 30], -t);
+    return 'rgb(' + rgb.join(',') + ')';
+  }
 
-  // ---- band cache -------------------------------------------------------
-  // Convert a segment's flat [lng,lat,...] parts to [[lat,lng],...] parts and
-  // capture a bbox for culling.
-  function toBand(parts, pcr, iri) {
+  // ---- values -----------------------------------------------------------
+  const c7Ready = () => CYC() && CYC().hasData() && CYC().park() === (RIP() && RIP().state.park);
+  function segValues(routeIdent, begMp, c6seg, metricKey) {
+    const k = metricKey || state.metric;
+    const c6 = c6seg ? c6seg[k] : null;
+    let c7 = null;
+    if (c7Ready()) { const m = CYC().matchSeg(routeIdent, begMp); c7 = m ? m[k] : null; }
+    return { c6: c6 == null ? null : c6, c7: c7 == null ? null : c7,
+      d: (c6 != null && c7 != null) ? (c7 - c6) : null };
+  }
+  function lotValues(sec, metricKey) {
+    const k = metricKey || state.metric;
+    const c6 = (sec.rip || {})[k];
+    let c7 = null;
+    if (c7Ready() && k === 'PCR') { const m = CYC().matchLot(sec.route_id); c7 = m ? m.PCR : null; }
+    return { c6: c6 == null ? null : c6, c7, d: (c6 != null && c7 != null) ? (c7 - c6) : null };
+  }
+  // Which number drives the colour, given the current mode/cycle.
+  function shown(v) {
+    if (state.mode === 'change') return v.d;
+    return state.cycle === 'c7' ? v.c7 : v.c6;
+  }
+  function colorOf(v, max) {
+    const n = shown(v);
+    return state.mode === 'change' ? changeColor(n, max) : valueColor(n);
+  }
+
+  // ---- band geometry cache ---------------------------------------------
+  function toBand(parts, meta) {
     const out = [], box = [90, 180, -90, -180];
     for (const flat of parts) {
       const pts = [];
@@ -65,170 +120,350 @@
       }
       if (pts.length >= 2) out.push(pts);
     }
-    return out.length ? { parts: out, box, pcr, iri } : null;
+    return out.length ? Object.assign({ parts: out, box }, meta) : null;
   }
-
   function build02() {
     const bands = [];
     for (const s of RIP().state.segments) {
       if (!s._g) continue;
-      const b = toBand(s._g, s.PCR != null ? s.PCR : null, s.IRI_AVG != null ? s.IRI_AVG : null);
+      const b = toBand(s._g, { rid: s.ROUTE_IDENT, begMp: s.BEG_MP, endMp: s.END_MP, seg: s });
       if (b) bands.push(b);
     }
     return bands;
   }
-
-  // Aggregate 0.02 mi segments into 0.1 mi bins per route: gather the flat
-  // [lng,lat,...] geometry parts of the sub-segments (toBand converts + boxes
-  // them, exactly as for 0.02 mi) and take a length-weighted mean of each
-  // metric over the sub-segments that have a value.
   function build10() {
-    const byRoute = RIP().state.segsByRoute;   // rid -> segments sorted by BEG_MP
-    const bands = [];
-    byRoute.forEach((segs) => {
+    const byRoute = RIP().state.segsByRoute, bands = [];
+    byRoute.forEach((segs, rid) => {
       let bin = null, key = null;
       const flush = () => {
         if (!bin || !bin.flat.length) { bin = null; return; }
-        const b = toBand(bin.flat, bin.wl ? bin.pcrSum / bin.wl : null, bin.wi ? bin.iriSum / bin.wi : null);
+        const b = toBand(bin.flat, { rid, begMp: bin.begMp, endMp: bin.endMp, members: bin.members });
         if (b) bands.push(b);
         bin = null;
       };
       for (const s of segs) {
         if (!s._g) continue;
         const k = Math.floor((s.BEG_MP || 0) / 0.1 + 1e-6);
-        if (k !== key) { flush(); key = k; bin = { flat: [], pcrSum: 0, wl: 0, iriSum: 0, wi: 0 }; }
-        for (const flat of s._g) bin.flat.push(flat);   // keep raw [lng,lat,...] parts
-        const len = s.INT_LENGTH || 105.6;
-        if (s.PCR != null) { bin.pcrSum += s.PCR * len; bin.wl += len; }
-        if (s.IRI_AVG != null) { bin.iriSum += s.IRI_AVG * len; bin.wi += len; }
+        if (k !== key) { flush(); key = k; bin = { flat: [], members: [], begMp: k * 0.1, endMp: k * 0.1 + 0.1 }; }
+        for (const flat of s._g) bin.flat.push(flat);
+        bin.members.push(s);
       }
       flush();
     });
     return bands;
   }
-
   function bandsFor(res) {
-    if (state.cachePark !== RIP().state.park) { state.cache = {}; state.cachePark = RIP().state.park; }
+    const park = RIP().state.park;
+    if (state.cachePark !== park) { state.cache = {}; state.cachePark = park; }
     if (!state.cache[res]) state.cache[res] = res === 0.02 ? build02() : build10();
     return state.cache[res];
+  }
+  // Length-weighted mean of a metric over a band's member segments (0.1 mi).
+  function meanOf(members, key, side) {
+    let sum = 0, w = 0;
+    for (const s of members) {
+      const v = side === 'c7'
+        ? (c7Ready() ? (CYC().matchSeg(s.ROUTE_IDENT, s.BEG_MP) || {})[key] : null)
+        : s[key];
+      if (v != null) { const len = s.INT_LENGTH || 105.6; sum += v * len; w += len; }
+    }
+    return w ? sum / w : null;
+  }
+  function bandValues(band, metricKey) {
+    const k = metricKey || state.metric;
+    if (band.members) {
+      const c6 = meanOf(band.members, k, 'c6'), c7 = meanOf(band.members, k, 'c7');
+      return { c6, c7, d: (c6 != null && c7 != null) ? (c7 - c6) : null };
+    }
+    return segValues(band.rid, band.begMp, band.seg, k);
+  }
+
+  // ---- hover comparison -------------------------------------------------
+  let hoverEl = null;
+  function hoverBox() {
+    if (hoverEl) return hoverEl;
+    hoverEl = document.createElement('div');
+    hoverEl.id = 'rip-hover';
+    hoverEl.style.cssText = 'position:fixed;z-index:99997;pointer-events:none;display:none;'
+      + 'background:rgba(255,255,255,.98);border:1px solid #cfd6dd;border-radius:10px;'
+      + 'box-shadow:0 6px 22px rgba(15,25,45,.25);padding:9px 11px;font-family:system-ui;min-width:210px';
+    document.body.appendChild(hoverEl);
+    return hoverEl;
+  }
+  function cmpTable(title, sub, rows) {
+    const dTxt = (d) => d == null ? '—' : (d > 0 ? '+' : '') + (Math.abs(d) < 10 ? d.toFixed(1) : d.toFixed(0));
+    return '<div style="font:700 12px \'IBM Plex Mono\',monospace;color:#0B3D66">' + esc(title) + '</div>'
+      + (sub ? '<div style="font-size:11.5px;color:#8a949f;margin-bottom:6px">' + esc(sub) + '</div>' : '')
+      + '<table style="width:100%;border-collapse:collapse;font:12px system-ui">'
+      + '<tr><th style="text-align:left;padding:2px 6px 3px 0;color:#8a949f;font-weight:600"></th>'
+      + '<th style="text-align:right;padding:2px 6px 3px;color:#8a949f;font-weight:700">C6</th>'
+      + '<th style="text-align:right;padding:2px 6px 3px;color:#8a949f;font-weight:700">C7</th>'
+      + '<th style="text-align:right;padding:2px 0 3px 6px;color:#8a949f;font-weight:700">Δ</th></tr>'
+      + rows.map(([label, v]) => {
+        const dc = v.d == null ? '#c3cad2' : v.d > 0 ? '#0e7c66' : v.d < 0 ? '#c0392b' : '#5b6673';
+        const dot = (x, kind) => x == null ? '<span style="color:#c3cad2">—</span>'
+          : '<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:'
+            + ((kind === 'iri' ? iriColor(x) : scoreColor(x)) || '#c3cad2') + ';margin-right:5px;vertical-align:middle"></span>'
+            + (Math.abs(x) < 10 ? Number(x).toFixed(1) : Math.round(x));
+        return '<tr><td style="padding:2px 6px 2px 0;color:#3a4653;white-space:nowrap">' + esc(label) + '</td>'
+          + '<td style="text-align:right;padding:2px 6px;font-variant-numeric:tabular-nums">' + dot(v.c6) + '</td>'
+          + '<td style="text-align:right;padding:2px 6px;font-variant-numeric:tabular-nums">' + dot(v.c7) + '</td>'
+          + '<td style="text-align:right;padding:2px 0 2px 6px;font-weight:700;color:' + dc + ';font-variant-numeric:tabular-nums">' + dTxt(v.d) + '</td></tr>';
+      }).join('') + '</table>';
+  }
+  function showHover(html, ev) {
+    const el = hoverBox();
+    el.innerHTML = html;
+    el.style.display = 'block';
+    const oe = ev && ev.originalEvent;
+    const x = oe ? oe.clientX : 40, y = oe ? oe.clientY : 40;
+    const w = el.offsetWidth || 230, h = el.offsetHeight || 140;
+    el.style.left = Math.min(window.innerWidth - w - 10, x + 16) + 'px';
+    el.style.top = Math.max(8, Math.min(window.innerHeight - h - 10, y - h / 2)) + 'px';
+  }
+  const hideHover = () => { if (hoverEl) hoverEl.style.display = 'none'; };
+
+  function bandHover(band) {
+    const rows = HOVER_METRICS.map((k) => [metricDef(k).l, bandValues(band, k)]);
+    const iri = bandValues(band, 'IRI_AVG');
+    if (iri.c6 != null || iri.c7 != null) rows.push(['IRI', iri]);
+    return cmpTable(band.rid, band.begMp.toFixed(2) + '–' + band.endMp.toFixed(2) + ' mi'
+      + (band.members ? '  (0.1 mi mean of ' + band.members.length + ')' : ''), rows);
+  }
+  function lotHover(sec) {
+    return cmpTable(sec.route_id || sec.name, (sec.name || '') + ' · parking',
+      [['PCR', lotValues(sec, 'PCR')]]);
   }
 
   // ---- draw -------------------------------------------------------------
   let layer = null;
-  function clear() { const m = getMap(); if (layer && m) { try { m.removeLayer(layer); } catch (_) {} } layer = null; }
+  function clear() { const m = getMap(); if (layer && m) { try { m.removeLayer(layer); } catch (_) {} } layer = null; hideHover(); }
 
   function draw() {
-    const m = getMap();
-    const R = RIP();
-    if (!m || !R || !R.hasPark()) { clear(); updateControl(); return; }
+    const m = getMap(), R = RIP();
+    if (!m || !R || !R.hasPark()) { clear(); paint(); return; }
     if (!m.getPane(PANE)) { m.createPane(PANE); m.getPane(PANE).style.zIndex = 350; }
-
     clear();
     state.capped = false;
-    if (!state.metric) { updateControl(); return; }
+    if (state.mode === 'off') { paint(); return; }
+    // Cycle 7 / change need the live data
+    if ((state.cycle === 'c7' || state.mode === 'change') && CYC() && !c7Ready()) {
+      CYC().loadPark(R.state.park, { onchange: () => { draw(); } });
+    }
 
     const zoom = m.getZoom();
-    if (zoom < MINZOOM[state.res]) { updateControl(); return; }   // too far out — draw nothing
-
-    const bounds = m.getBounds().pad(0.25);
-    const bs = bounds.getSouth(), bw = bounds.getWest(), bn = bounds.getNorth(), be = bounds.getEast();
-    const all = bandsFor(state.res);
+    if (state.roads && zoom < MINZOOM[state.res]) { paint(); return; }
+    const b = m.getBounds().pad(0.25);
+    const bs = b.getSouth(), bw = b.getWest(), bn = b.getNorth(), be = b.getEast();
     layer = L.layerGroup([], { pane: PANE });
-
     let n = 0;
-    for (const band of all) {
-      const b = band.box;
-      if (b[0] > bn || b[2] < bs || b[1] > be || b[3] < bw) continue;   // outside view
-      const col = colorFor(state.metric, metricVal(band, state.metric));
-      if (!col) continue;                                               // no value → skip
-      for (const pts of band.parts) {
-        L.polyline(pts, { pane: PANE, color: col, weight: 5, opacity: 0.9, lineCap: 'butt', interactive: false }).addTo(layer);
+
+    // --- roads
+    if (state.roads && zoom >= MINZOOM[state.res]) {
+      const all = bandsFor(state.res);
+      const vis = [];
+      for (const band of all) {
+        const x = band.box;
+        if (x[0] > bn || x[2] < bs || x[1] > be || x[3] < bw) continue;
+        vis.push(band);
+      }
+      // Change mode: scale the diverging ramp to what's on screen. Use the 90th
+      // percentile of |Δ|, not the max — a single reconstruction (e.g. +97) would
+      // otherwise compress every ordinary change into a near-colourless tint.
+      // Outliers simply saturate at the ends. Clamped to a sane 10–50 window.
+      let max = 20;
+      if (state.mode === 'change') {
+        const ds = [];
+        for (const band of vis) { const d = bandValues(band).d; if (d != null) ds.push(Math.abs(d)); }
+        ds.sort((a, b) => a - b);
+        const p90 = ds.length ? ds[Math.min(ds.length - 1, Math.floor(ds.length * 0.9))] : 0;
+        max = Math.max(10, Math.min(50, Math.ceil(p90 / 5) * 5)); state.scaleMax = max;
+      }
+      for (const band of vis) {
+        const v = bandValues(band);
+        const col = colorOf(v, max);
+        if (!col) continue;
+        for (const pts of band.parts) {
+          const pl = L.polyline(pts, { pane: PANE, color: col, weight: 6, opacity: 0.95,
+            lineCap: 'butt', interactive: true, bubblingMouseEvents: false });
+          pl.on('mouseover', (e) => showHover(bandHover(band), e));
+          pl.on('mousemove', (e) => showHover(bandHover(band), e));
+          pl.on('mouseout', hideHover);
+          pl.addTo(layer);
+          if (++n >= MAXPATHS) { state.capped = true; break; }
+        }
+        if (state.capped) break;
+      }
+    }
+
+    // --- parking (PCR only; lots carry no per-index data in Cycle 6)
+    if (state.parking && !state.capped) {
+      const lots = (RW().SECTIONS || []).filter((s) => s.rip && s.type === 'area' && Array.isArray(s.alignment) && s.alignment.length > 2);
+      for (const sec of lots) {
+        const v = lotValues(sec, 'PCR');
+        const num = state.mode === 'change' ? v.d : (state.cycle === 'c7' ? v.c7 : v.c6);
+        const col = state.mode === 'change' ? changeColor(num, state.scaleMax) : scoreColor(num);
+        if (!col) continue;
+        const rings = (sec.holes && sec.holes.length) ? [sec.alignment].concat(sec.holes) : sec.alignment;
+        const pg = L.polygon(rings, { pane: PANE, color: col, weight: 2, fillColor: col,
+          fillOpacity: 0.55, opacity: 0.95, interactive: true, bubblingMouseEvents: false });
+        pg.on('mouseover', (e) => showHover(lotHover(sec), e));
+        pg.on('mousemove', (e) => showHover(lotHover(sec), e));
+        pg.on('mouseout', hideHover);
+        pg.addTo(layer);
         if (++n >= MAXPATHS) { state.capped = true; break; }
       }
-      if (state.capped) break;
     }
+
     layer.addTo(m);
-    updateControl();
+    paint();
   }
 
-  // redraw on pan/zoom, wiring each map instance once
   function ensureWired() {
     const m = getMap();
     if (!m || m._ripWired) return;
     m._ripWired = true;
-    m.on('moveend zoomend', () => { if (state.metric) draw(); });
+    m.on('moveend zoomend', () => { if (state.mode !== 'off') draw(); });
+    m.on('mouseout', hideHover);
   }
 
   // ---- control ----------------------------------------------------------
-  function seg(btnLabel, active, attr) {
-    return '<button ' + attr + ' style="border:1px solid ' + (active ? '#0B3D66' : '#cfd6dd') + ';background:'
-      + (active ? '#0B3D66' : '#fff') + ';color:' + (active ? '#fff' : '#33414f')
-      + ';padding:4px 9px;border-radius:7px;cursor:pointer;font:600 11.5px system-ui">' + btnLabel + '</button>';
-  }
+  // Quartered circle in the official condition colours.
+  const ICON = '<svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true">'
+    + '<path d="M12 12 L12 2 A10 10 0 0 1 22 12 Z" fill="#0072b2"/>'
+    + '<path d="M12 12 L22 12 A10 10 0 0 1 12 22 Z" fill="#1b9e77"/>'
+    + '<path d="M12 12 L12 22 A10 10 0 0 1 2 12 Z" fill="#e69f00"/>'
+    + '<path d="M12 12 L2 12 A10 10 0 0 1 12 2 Z" fill="#c51b7d"/>'
+    + '<circle cx="12" cy="12" r="10" fill="none" stroke="#fff" stroke-width="1.5"/></svg>';
+
+  const seg = (label, active, attr) =>
+    '<button ' + attr + ' style="border:1px solid ' + (active ? '#0B3D66' : '#cfd6dd') + ';background:'
+    + (active ? '#0B3D66' : '#fff') + ';color:' + (active ? '#fff' : '#33414f')
+    + ';padding:4px 9px;border-radius:7px;cursor:pointer;font:600 11.5px system-ui">' + label + '</button>';
+
   function mount() {
     const host = document.getElementById('view-field');
     if (!host) return null;
-    let el = document.getElementById('rip-band-ctrl');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'rip-band-ctrl';
-      el.style.cssText = 'position:absolute;left:12px;bottom:16px;z-index:640;background:rgba(255,255,255,.96);'
-        + 'border:1px solid #d3dae1;border-radius:11px;box-shadow:0 3px 14px rgba(20,35,60,.22);'
-        + 'padding:9px 11px;font-family:system-ui;max-width:210px';
-      host.appendChild(el);
+    let btn = document.getElementById('rip-band-btn');
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.id = 'rip-band-btn';
+      btn.title = 'Condition colours';
+      btn.style.cssText = 'position:absolute;left:12px;top:150px;z-index:641;width:36px;height:36px;'
+        + 'display:flex;align-items:center;justify-content:center;background:#fff;border:1px solid #cfd6dd;'
+        + 'border-radius:9px;box-shadow:0 2px 8px rgba(20,35,60,.22);cursor:pointer;padding:0';
+      btn.innerHTML = ICON;
+      btn.addEventListener('click', () => { state.open = !state.open; paint(); });
+      host.appendChild(btn);
     }
-    return el;
+    let panel = document.getElementById('rip-band-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'rip-band-panel';
+      panel.style.cssText = 'position:absolute;left:56px;top:150px;z-index:642;background:rgba(255,255,255,.98);'
+        + 'border:1px solid #cfd6dd;border-radius:11px;box-shadow:0 4px 18px rgba(20,35,60,.24);'
+        + 'padding:10px 12px;font-family:system-ui;width:232px;display:none';
+      host.appendChild(panel);
+    }
+    return btn;
   }
-  function updateControl() {
+
+  // Render the button badge + panel contents.
+  function paint() {
     const R = RIP();
-    const el = document.getElementById('rip-band-ctrl');
-    if (!el) return;
-    if (!R || !R.hasPark()) { el.style.display = 'none'; return; }
-    el.style.display = '';
-    const m = getMap();
-    const zoom = m ? m.getZoom() : 0;
-    const gated = state.metric && zoom < MINZOOM[state.res];
-    const legend = state.metric ? legendFor(state.metric) : null;
+    const btn = document.getElementById('rip-band-btn');
+    const panel = document.getElementById('rip-band-panel');
+    if (!btn || !panel) return;
+    const havePark = R && R.hasPark();
+    btn.style.display = havePark ? 'flex' : 'none';
+    if (!havePark) { panel.style.display = 'none'; return; }
+    // active-state ring on the button
+    btn.style.borderColor = state.mode === 'off' ? '#cfd6dd' : '#0B3D66';
+    btn.style.boxShadow = state.mode === 'off' ? '0 2px 8px rgba(20,35,60,.22)' : '0 0 0 2px #0B3D66, 0 2px 8px rgba(20,35,60,.22)';
+    panel.style.display = state.open ? 'block' : 'none';
+    if (!state.open) return;
 
-    el.innerHTML =
-      '<div style="font:700 11px system-ui;text-transform:uppercase;letter-spacing:.5px;color:#0B3D66;margin-bottom:6px">Condition bands</div>'
+    const m = getMap(), zoom = m ? m.getZoom() : 0;
+    const gated = state.mode !== 'off' && state.roads && zoom < MINZOOM[state.res];
+    const c7 = c7Ready();
+    const badge = state.mode === 'off' ? ['Off', '#8a949f', '#eef1f4']
+      : state.mode === 'change' ? ['Change C6 → C7', '#fff', '#6a3d9a']
+        : state.cycle === 'c7' ? ['Cycle 7 data', '#fff', '#0B3D66'] : ['Cycle 6 data', '#fff', '#0e7c66'];
+
+    let legend = '';
+    if (state.mode === 'value') {
+      const L2 = (RIP().legend ? RIP().legend(metricDef(state.metric).kind === 'iri' ? 'IRI' : 'PCR') : []);
+      legend = '<div style="font:600 10.5px system-ui;color:#8a949f;margin:8px 0 4px">' + esc(metricDef(state.metric).l) + '</div>'
+        + L2.map(([lab, c]) => '<div style="display:flex;align-items:center;gap:6px;font:11px system-ui;color:#3a4653;line-height:1.5">'
+          + '<span style="display:inline-block;width:14px;height:9px;border-radius:2px;background:' + c + '"></span>' + lab + '</div>').join('');
+    } else if (state.mode === 'change') {
+      const mx = state.scaleMax;
+      const stops = [-mx, -mx / 2, 0, mx / 2, mx];
+      legend = '<div style="font:600 10.5px system-ui;color:#8a949f;margin:8px 0 4px">Δ ' + esc(metricDef(state.metric).l) + ' (C7 − C6)</div>'
+        + '<div style="display:flex;height:11px;border-radius:3px;overflow:hidden;border:1px solid #e3e8ee">'
+        + stops.map((s) => '<span style="flex:1;background:' + changeColor(s, mx) + '"></span>').join('') + '</div>'
+        + '<div style="display:flex;justify-content:space-between;font:10.5px system-ui;color:#5b6673;margin-top:2px">'
+        + '<span>−' + mx + '</span><span>0</span><span>+' + mx + '</span></div>'
+        + '<div style="font:10.5px system-ui;color:#8a949f;margin-top:3px">red = declined · green = improved</div>';
+    }
+
+    panel.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">'
+      + '<span style="font:700 11px system-ui;text-transform:uppercase;letter-spacing:.5px;color:#0B3D66">Condition</span>'
+      + '<button id="rip-band-close" style="border:0;background:#eef1f4;border-radius:6px;width:20px;height:20px;cursor:pointer;font-size:12px;line-height:1;color:#5b6673">✕</button></div>'
+      + '<div style="display:inline-block;background:' + badge[2] + ';color:' + badge[1] + ';border-radius:6px;padding:2px 8px;font:700 10.5px system-ui;margin-bottom:8px">' + badge[0] + '</div>'
       + '<div style="display:flex;gap:4px;margin-bottom:6px">'
-      + seg('Off', !state.metric, 'data-m="off"') + seg('PCR', state.metric === 'PCR', 'data-m="PCR"') + seg('IRI', state.metric === 'IRI', 'data-m="IRI"')
+      + seg('Off', state.mode === 'off', 'data-mode="off"') + seg('Value', state.mode === 'value', 'data-mode="value"') + seg('Change', state.mode === 'change', 'data-mode="change"')
       + '</div>'
-      + '<div style="display:flex;gap:4px;align-items:center;' + (state.metric ? '' : 'opacity:.45;pointer-events:none') + '">'
-      + '<span style="font:600 11px system-ui;color:#8a949f;margin-right:2px">Every</span>'
-      + seg('0.1 mi', state.res === 0.1, 'data-r="0.1"') + seg('0.02 mi', state.res === 0.02, 'data-r="0.02"')
-      + '</div>'
-      + (gated ? '<div style="margin-top:7px;font:12px system-ui;color:#b26a00">Zoom in to show ' + state.res + ' mi bands</div>' : '')
-      + (state.capped ? '<div style="margin-top:7px;font:11.5px system-ui;color:#b26a00">Too many to draw here — zoom in to see the rest</div>' : '')
-      + (legend && !gated ? '<div style="margin-top:8px;border-top:1px solid #eef1f4;padding-top:7px">'
-          + '<div style="font:600 10.5px system-ui;color:#8a949f;margin-bottom:4px">' + (state.metric === 'IRI' ? 'IRI (in/mi)' : 'PCR') + '</div>'
-          + legend.map(([lab, c]) => '<div style="display:flex;align-items:center;gap:6px;font:11px system-ui;color:#3a4653;line-height:1.5">'
-              + '<span style="display:inline-block;width:14px;height:9px;border-radius:2px;background:' + c + '"></span>' + lab + '</div>').join('')
-          + '</div>' : '');
+      + (state.mode === 'value' ? '<div style="display:flex;gap:4px;margin-bottom:6px">'
+          + seg('Cycle 6', state.cycle === 'c6', 'data-cyc="c6"') + seg('Cycle 7', state.cycle === 'c7', 'data-cyc="c7"') + '</div>' : '')
+      + (state.mode !== 'off' ?
+        '<select id="rip-band-metric" style="width:100%;border:1px solid #d3dae1;border-radius:8px;padding:5px 7px;font:12px system-ui;background:#fff;margin-bottom:6px">'
+        + METRICS.filter((mm) => state.mode !== 'change' || mm.kind !== 'iri')
+          .map((mm) => '<option value="' + mm.k + '"' + (mm.k === state.metric ? ' selected' : '') + '>' + esc(mm.l) + '</option>').join('')
+        + '</select>'
+        + '<div style="display:flex;gap:4px;align-items:center;margin-bottom:6px"><span style="font:11px system-ui;color:#8a949f">Every</span>'
+        + seg('0.1 mi', state.res === 0.1, 'data-res="0.1"') + seg('0.02 mi', state.res === 0.02, 'data-res="0.02"') + '</div>'
+        + '<div style="display:flex;gap:10px;font:11.5px system-ui;color:#3a4653;margin-bottom:2px">'
+        + '<label style="display:flex;gap:4px;align-items:center;cursor:pointer"><input type="checkbox" id="rip-band-roads"' + (state.roads ? ' checked' : '') + '>Roads</label>'
+        + '<label style="display:flex;gap:4px;align-items:center;cursor:pointer"><input type="checkbox" id="rip-band-parking"' + (state.parking ? ' checked' : '') + '>Parking</label></div>'
+        : '')
+      + ((state.mode !== 'off' && (state.cycle === 'c7' || state.mode === 'change') && !c7) ? '<div style="font:11px system-ui;color:#b26a00;margin-top:5px">Loading Cycle 7…</div>' : '')
+      + (gated ? '<div style="font:11px system-ui;color:#b26a00;margin-top:5px">Zoom in to show ' + state.res + ' mi bands</div>' : '')
+      + (state.capped ? '<div style="font:11px system-ui;color:#b26a00;margin-top:5px">Too many to draw — zoom in</div>' : '')
+      + legend
+      + (state.mode !== 'off' && state.parking && state.metric !== 'PCR' ? '<div style="font:10.5px system-ui;color:#8a949f;margin-top:6px">Parking has PCR only</div>' : '')
+      + '<div style="font:10.5px system-ui;color:#8a949f;margin-top:6px">Hover a band or lot for C6 / C7 / Δ</div>';
 
-    el.querySelectorAll('[data-m]').forEach((b) => b.onclick = () => {
-      state.metric = b.dataset.m === 'off' ? null : b.dataset.m; draw();
-    });
-    el.querySelectorAll('[data-r]').forEach((b) => b.onclick = () => {
-      state.res = Number(b.dataset.r); draw();
-    });
+    const $ = (id) => document.getElementById(id);
+    $('rip-band-close').onclick = () => { state.open = false; paint(); };
+    panel.querySelectorAll('[data-mode]').forEach((b) => b.onclick = () => { state.mode = b.dataset.mode; draw(); });
+    panel.querySelectorAll('[data-cyc]').forEach((b) => b.onclick = () => { state.cycle = b.dataset.cyc; draw(); });
+    panel.querySelectorAll('[data-res]').forEach((b) => b.onclick = () => { state.res = Number(b.dataset.res); draw(); });
+    const ms = $('rip-band-metric'); if (ms) ms.onchange = () => { state.metric = ms.value; draw(); };
+    const rd = $('rip-band-roads'); if (rd) rd.onchange = () => { state.roads = rd.checked; draw(); };
+    const pk = $('rip-band-parking'); if (pk) pk.onchange = () => { state.parking = pk.checked; draw(); };
   }
 
   // ---- boot -------------------------------------------------------------
-  // Keep the control mounted + the map wired whenever a park is present and the
-  // field view exists. Cheap poll, same pattern as the AECOM/CLIENT toggle.
   setInterval(() => {
     const R = RIP();
-    if (!R || !R.hasPark()) { const el = document.getElementById('rip-band-ctrl'); if (el) el.style.display = 'none'; return; }
-    if (mount()) { ensureWired(); if (!document.getElementById('rip-band-ctrl').dataset.init) { document.getElementById('rip-band-ctrl').dataset.init = '1'; updateControl(); } }
-    // first draw once the map exists and a metric is chosen but nothing drawn yet
-    if (state.metric && getMap() && !layer) draw();
+    if (!R || !R.hasPark()) {
+      const b = document.getElementById('rip-band-btn'); if (b) b.style.display = 'none';
+      const p = document.getElementById('rip-band-panel'); if (p) p.style.display = 'none';
+      return;
+    }
+    if (mount()) { ensureWired(); paint(); }
+    if (state.mode !== 'off' && getMap() && !layer) draw();
   }, 1000);
 
   window.RW2RIPMap = {
-    draw, setMetric: (m) => { state.metric = m; draw(); }, setRes: (r) => { state.res = Number(r); draw(); },
-    state, pcrColor, iriColor,
-    _build: { build02, build10, bandsFor },
+    draw, paint, state,
+    setMode: (m) => { state.mode = m; draw(); },
+    setMetric: (k) => { state.metric = k; draw(); },
+    setCycle: (c) => { state.cycle = c; draw(); },
+    setRes: (r) => { state.res = Number(r); draw(); },
+    scoreColor, iriColor, changeColor, valueColor,
+    _build: { build02, build10, bandsFor, bandValues, segValues, lotValues, bandHover, lotHover, cmpTable },
   };
 })();

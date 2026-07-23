@@ -44,7 +44,12 @@
     };
   }
 
-  const state = { park: null, all: [], byRoute: new Map(), fetchedAt: null, loading: false, error: null };
+  // Cycle 7 parking conditions (layer 7) — one row per lot, keyed by
+  // ROUTE_IDENT. Cycle 6 lots only carry PCR, so parking compares on PCR.
+  const FS_PARK = 'https://services3.arcgis.com/9Ij3DUv1U3250Rno/arcgis/rest/services/'
+    + 'NPS_Presentation_Dashboard_April_2024_WFL1/FeatureServer/7/query';
+
+  const state = { park: null, all: [], byRoute: new Map(), parking: new Map(), fetchedAt: null, loading: false, error: null };
   function index() {
     state.byRoute = new Map();
     for (const s of state.all) {
@@ -73,12 +78,12 @@
       });
     } catch (_) { return null; }
   }
-  async function writeCache(park, segs, fetchedAt) {
+  async function writeCache(park, segs, fetchedAt, parking) {
     try {
       const db = await idb();
       await new Promise((res, rej) => {
         const tx = db.transaction(STORE, 'readwrite');
-        tx.objectStore(STORE).put({ park, segs, fetchedAt }, park);
+        tx.objectStore(STORE).put({ park, segs, fetchedAt, parking: [...(parking || new Map())] }, park);
         tx.oncomplete = res; tx.onerror = () => rej(tx.error);
       });
     } catch (_) {}
@@ -103,6 +108,23 @@
     return all;
   }
 
+  // Cycle 7 parking: one PCR per lot. Sparse — many parks aren't collected yet.
+  async function fetchParking(park) {
+    const m = new Map();
+    try {
+      const p = new URLSearchParams({
+        where: "UNIT_ID='" + park + "'", outFields: 'ROUTE_IDENT,PAVED_RATING,RATING,CYCLE',
+        returnGeometry: 'false', f: 'json',
+      });
+      const j = await (await fetch(FS_PARK + '?' + p)).json();
+      for (const f of (j.features || [])) {
+        const a = f.attributes;
+        if (a && a.ROUTE_IDENT) m.set(a.ROUTE_IDENT, { PCR: num(a.PAVED_RATING), RATING: a.RATING, CYCLE: a.CYCLE });
+      }
+    } catch (_) { /* parking is optional; roads still work */ }
+    return m;
+  }
+
   // Load Cycle 7 for a park: cache-first, then network. `refresh` forces network
   // (Cycle 7 is ongoing). Returns the state; callers read .all / .byRoute / .error.
   async function loadPark(park, opts) {
@@ -115,16 +137,17 @@
       if (!opts.refresh) {
         const c = await readCache(park);
         if (c && c.segs && c.segs.length) {
-          state.all = c.segs; state.fetchedAt = c.fetchedAt; index(); state.loading = false;
+          state.all = c.segs; state.fetchedAt = c.fetchedAt;
+          state.parking = new Map(c.parking || []); index(); state.loading = false;
           if (typeof opts.onchange === 'function') opts.onchange();
           return state;
         }
       }
-      const segs = await fetchAll(park);
-      state.all = segs; state.fetchedAt = Date.now(); index();
-      writeCache(park, segs, state.fetchedAt);
+      const [segs, parking] = await Promise.all([fetchAll(park), fetchParking(park)]);
+      state.all = segs; state.parking = parking; state.fetchedAt = Date.now(); index();
+      writeCache(park, segs, state.fetchedAt, parking);
     } catch (e) {
-      state.error = e.message; state.all = []; state.byRoute = new Map();
+      state.error = e.message; state.all = []; state.byRoute = new Map(); state.parking = new Map();
     }
     state.loading = false;
     if (typeof opts.onchange === 'function') opts.onchange();
@@ -146,6 +169,8 @@
   window.RW2RIPCycle = {
     loadPark, get: () => state, segmentsFor: (r) => state.byRoute.get(r) || [],
     matchSeg, coverage, hasData: () => state.all.length > 0,
+    matchLot: (r) => state.parking.get(r) || null,
+    parkingCount: () => state.parking.size,
     park: () => state.park, fetchedAt: () => state.fetchedAt,
   };
 })();
