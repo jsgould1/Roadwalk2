@@ -29,24 +29,22 @@
   const state = { metric: null, res: 0.1, capped: false, cache: {}, cachePark: null };
 
   // ---- colour scales ----------------------------------------------------
-  // PCI-style 7-band scale for PCR (0-100, higher is better).
+  // Single source of truth is the RIP data module's NPS condition bands
+  // (blue best → red worst, confirmed with the user). Fall back to a local
+  // copy only if that module somehow isn't loaded yet.
+  const FALLBACK_BAND = { blue: '#2b7bba', dgreen: '#1a9850', lgreen: '#a6d96a', yellow: '#f6c700', red: '#d73027' };
   function pcrColor(v) {
+    if (RIP() && RIP().scoreColor) return RIP().scoreColor(v);
     if (v == null || isNaN(v)) return null;
-    return v >= 86 ? '#1a9850' : v >= 71 ? '#91cf60' : v >= 56 ? '#d9ef8b'
-      : v >= 41 ? '#fee08b' : v >= 26 ? '#fdae61' : v >= 11 ? '#f46d43' : '#d73027';
+    return v >= 90 ? FALLBACK_BAND.blue : v >= 80 ? FALLBACK_BAND.dgreen : v >= 70 ? FALLBACK_BAND.lgreen : v >= 60 ? FALLBACK_BAND.yellow : FALLBACK_BAND.red;
   }
-  // IRI in in/mi (lower is better); thresholds around FHWA good/acceptable/poor.
   function iriColor(v) {
+    if (RIP() && RIP().iriColor) return RIP().iriColor(v);
     if (v == null || isNaN(v)) return null;
-    return v < 60 ? '#1a9850' : v < 95 ? '#91cf60' : v < 135 ? '#d9ef8b'
-      : v < 170 ? '#fee08b' : v < 220 ? '#fdae61' : '#d73027';
+    return v < 60 ? FALLBACK_BAND.blue : v < 95 ? FALLBACK_BAND.dgreen : v < 135 ? FALLBACK_BAND.lgreen : v < 170 ? FALLBACK_BAND.yellow : FALLBACK_BAND.red;
   }
-  const LEGEND = {
-    PCR: [['86–100', '#1a9850'], ['71–85', '#91cf60'], ['56–70', '#d9ef8b'],
-          ['41–55', '#fee08b'], ['26–40', '#fdae61'], ['11–25', '#f46d43'], ['0–10', '#d73027']],
-    IRI: [['<60', '#1a9850'], ['60–95', '#91cf60'], ['95–135', '#d9ef8b'],
-          ['135–170', '#fee08b'], ['170–220', '#fdae61'], ['>220', '#d73027']],
-  };
+  const legendFor = (metric) => (RIP() && RIP().legend ? RIP().legend(metric)
+    : metric === 'IRI' ? [['<60', FALLBACK_BAND.blue], ['≥170', FALLBACK_BAND.red]] : [['≥90', FALLBACK_BAND.blue], ['<60', FALLBACK_BAND.red]]);
   const colorFor = (metric, v) => (metric === 'IRI' ? iriColor(v) : pcrColor(v));
   const metricVal = (band, metric) => (metric === 'IRI' ? band.iri : band.pcr);
 
@@ -188,7 +186,7 @@
     const m = getMap();
     const zoom = m ? m.getZoom() : 0;
     const gated = state.metric && zoom < MINZOOM[state.res];
-    const legend = state.metric ? LEGEND[state.metric] : null;
+    const legend = state.metric ? legendFor(state.metric) : null;
 
     el.innerHTML =
       '<div style="font:700 11px system-ui;text-transform:uppercase;letter-spacing:.5px;color:#0B3D66;margin-bottom:6px">Condition bands</div>'

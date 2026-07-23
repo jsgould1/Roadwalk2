@@ -90,14 +90,32 @@
     IRI_AVG: { dir: 'low', max: 400 }, RUT_AVG: { dir: 'low', max: 1 }, FCI: { dir: 'low', max: 1 },
   };
   const LOT_METRICS = ['PCR', 'CONDITION_RATING', 'FCI'];
-  const RAMP = ['#d73027', '#fdae61', '#fee08b', '#a6d96a', '#1a9850'];
-  const NO_DATA = '#b8c0c8';
-  function norm(m, v) {
-    const d = METRICS[m]; if (!d || v == null || isNaN(v)) return null;
-    const t = Math.max(0, Math.min(1, Number(v) / d.max));
-    return d.dir === 'low' ? 1 - t : t;
+
+  // NPS RIP condition colour bands (confirmed with the user): blue = best →
+  // red = worst. Applied to PCR and every 0-100 index. IRI (roughness, in/mi)
+  // reuses the same 5 colours on its own thresholds since it is not a 0-100
+  // score. Values are nulled at -1 upstream, so a null here means "not
+  // measured" and gets no colour.
+  const BAND = { blue: '#2b7bba', dgreen: '#1a9850', lgreen: '#a6d96a', yellow: '#f6c700', red: '#d73027', none: '#c3cad2' };
+  // 0-100 score → band (higher is better): ≥90 / 80-89 / 70-79 / 60-69 / <60
+  function scoreColor(v) {
+    if (v == null || isNaN(v)) return null;
+    v = Number(v);
+    return v >= 90 ? BAND.blue : v >= 80 ? BAND.dgreen : v >= 70 ? BAND.lgreen : v >= 60 ? BAND.yellow : BAND.red;
   }
-  function colorFor(m, v) { const n = norm(m, v); return n == null ? NO_DATA : RAMP[Math.min(4, Math.floor(n * 5))]; }
+  // IRI in in/mi → band (lower is better)
+  function iriColor(v) {
+    if (v == null || isNaN(v)) return null;
+    v = Number(v);
+    return v < 60 ? BAND.blue : v < 95 ? BAND.dgreen : v < 135 ? BAND.lgreen : v < 170 ? BAND.yellow : BAND.red;
+  }
+  const SCORE_FIELDS = new Set(['PCR', 'CONDITION_RATING', 'SCR', 'RCI', 'SC_INDEX',
+    'AC_INDEX', 'LC_INDEX', 'TC_INDEX', 'PATCH_INDEX', 'RUT_INDEX', 'API']);
+  // Colour a table cell's value by field: 0-100 scores use the RIP bands, IRI
+  // its own scale; everything else (RUT_AVG, FCI, non-metrics) stays uncoloured.
+  function cellColor(key, v) { return key === 'IRI_AVG' ? iriColor(v) : SCORE_FIELDS.has(key) ? scoreColor(v) : null; }
+  const SCORE_LEGEND = [['≥ 90', BAND.blue], ['80–89', BAND.dgreen], ['70–79', BAND.lgreen], ['60–69', BAND.yellow], ['< 60', BAND.red]];
+  const IRI_LEGEND = [['< 60', BAND.blue], ['60–95', BAND.dgreen], ['95–135', BAND.lgreen], ['135–170', BAND.yellow], ['≥ 170', BAND.red]];
 
   // ---- default columns per tab ------------------------------------------
   const DEFAULT_COLS = {
@@ -128,6 +146,7 @@
     q: '', kind: 'all', scope: 'all', facets: {}, range: { min: '', max: '' },
     cols: { assets: DEFAULT_COLS.assets.slice(), conditions: DEFAULT_COLS.conditions.slice() },
     custom: [],        // [{ key, label }]
+    expanded: new Set(),   // route ids expanded in the Conditions tree
     colMenuOpen: false,
   };
 
@@ -364,9 +383,10 @@
       : fmtVal(key, v);
     const align = (meta(key).u || meta(key).num || typeof v === 'number') ? 'right' : 'left';
     if (disp == null) return '<td style="padding:5px 9px;color:#c3cad2;text-align:' + align + '">—</td>';
-    if (METRICS[key]) {
-      return '<td style="padding:5px 9px;text-align:right;font-variant-numeric:tabular-nums"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:'
-        + colorFor(key, v) + ';margin-right:6px"></span>' + esc(disp) + '</td>';
+    const bc = cellColor(key, v);
+    if (bc) {
+      return '<td style="padding:5px 9px;text-align:right;font-variant-numeric:tabular-nums"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'
+        + bc + ';margin-right:6px;vertical-align:middle"></span>' + esc(disp) + '</td>';
     }
     const mono = key === 'ROUTE_IDENT';
     return '<td style="padding:5px 9px;text-align:' + align + (key === 'RTE_NAME' ? ';max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' : '')
@@ -374,7 +394,7 @@
   }
   function th(key, label) {
     const on = state.sort.key === key;
-    const align = (meta(key).u || meta(key).num || METRICS[key] || key === 'station' || key === 'size') ? 'right' : 'left';
+    const align = (meta(key).u || meta(key).num || METRICS[key] || SCORE_FIELDS.has(key) || key === 'station' || key === 'size') ? 'right' : 'left';
     return '<th data-sort="' + key + '" style="position:sticky;top:0;background:#f7f9fb;z-index:1;text-align:' + align
       + ';padding:7px 9px;border-bottom:1px solid #e3e8ee;cursor:pointer;font:700 11.5px system-ui;color:#12233b;white-space:nowrap">'
       + esc(label) + (on ? (state.sort.dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
@@ -399,25 +419,109 @@
       + '<th style="position:sticky;top:0;background:#f7f9fb;border-bottom:1px solid #e3e8ee;width:30px"></th>'
       + '</tr></thead><tbody>' + body + '</tbody></table>' };
   }
+  // A stacked bar showing what fraction of a route's length sits in each PCR
+  // band — a quick condition fingerprint on the collapsed route row.
+  function conditionBar(segs) {
+    const buckets = { blue: 0, dgreen: 0, lgreen: 0, yellow: 0, red: 0, none: 0 };
+    let tot = 0;
+    for (const s of segs) {
+      const len = s.INT_LENGTH || 105.6; tot += len;
+      const v = s.PCR;
+      const k = v == null ? 'none' : v >= 90 ? 'blue' : v >= 80 ? 'dgreen' : v >= 70 ? 'lgreen' : v >= 60 ? 'yellow' : 'red';
+      buckets[k] += len;
+    }
+    if (!tot) return '';
+    const order = [['blue', BAND.blue], ['dgreen', BAND.dgreen], ['lgreen', BAND.lgreen], ['yellow', BAND.yellow], ['red', BAND.red], ['none', BAND.none]];
+    return '<span title="PCR distribution by length" style="display:inline-flex;width:94px;height:10px;border-radius:3px;overflow:hidden;border:1px solid #dfe4ea;flex:0 0 auto">'
+      + order.map(([k, c]) => buckets[k] ? '<span style="width:' + (100 * buckets[k] / tot).toFixed(2) + '%;background:' + c + '"></span>' : '').join('') + '</span>';
+  }
+  function pcrDot(v) {
+    const c = scoreColor(v);
+    if (c == null) return '<span style="color:#c3cad2;font-variant-numeric:tabular-nums;min-width:34px;text-align:right;display:inline-block">—</span>';
+    return '<span style="font-variant-numeric:tabular-nums;min-width:34px;text-align:right;display:inline-block"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'
+      + c + ';margin-right:5px;vertical-align:middle"></span>' + esc(v) + '</span>';
+  }
+  function mpRange(segs, sec) {
+    const a = ripOf(sec);
+    if (a.BEG_MP_DCV != null && a.END_MP_DCV != null) return a.BEG_MP_DCV.toFixed(2) + '–' + a.END_MP_DCV.toFixed(2);
+    if (!segs.length) return '—';
+    let lo = Infinity, hi = -Infinity;
+    for (const s of segs) { if (s.BEG_MP < lo) lo = s.BEG_MP; if (s.END_MP > hi) hi = s.END_MP; }
+    return lo.toFixed(2) + '–' + hi.toFixed(2);
+  }
+
+  // Conditions tab: routes are the primary rows (collapsed by default); the
+  // 0.02 mi segments live under each route and reveal on expand. Route ID /
+  // name are shown once on the route banner, so segment sub-rows drop them.
   function conditionsTable() {
-    const cols = displayCols('conditions');
-    const rows = sortRows(filteredConditions(), (r, k) => condVal(r, k));
-    const shown = rows.slice(0, state.limit);
-    const body = shown.map((r) => {
-      const { seg, sec } = r;
-      return '<tr data-detail="' + esc(sec.id) + '" data-seg="' + (seg.BEG_MP != null ? seg.BEG_MP : '') + '" style="border-bottom:1px solid #f2f5f8;cursor:pointer">'
-        + cols.map((k) => {
-          if (k === 'station') return '<td style="padding:5px 9px;font:12px \'IBM Plex Mono\',monospace;color:#5b6673;white-space:nowrap;text-align:right">'
-            + (seg.BEG_MP != null ? seg.BEG_MP.toFixed(2) : '?') + '–' + (seg.END_MP != null ? seg.END_MP.toFixed(2) : '?') + '</td>';
-          return cell(k, condVal(r, k));
-        }).join('')
-        + '<td style="padding:5px 9px" data-nodetail="1"><button data-goto="' + esc(sec.id) + '" title="Show on map" style="border:0;background:transparent;cursor:pointer;font-size:14px">🗺</button></td></tr>';
-    }).join('');
-    return { total: rows.length, shown: shown.length, html:
+    const cols = displayCols('conditions').filter((k) => k !== 'ROUTE_IDENT' && k !== 'RTE_NAME');
+    // group filtered segments by their parent route
+    const groups = new Map();
+    for (const r of filteredConditions()) {
+      let g = groups.get(r.sec.id);
+      if (!g) groups.set(r.sec.id, g = { sec: r.sec, segs: [] });
+      g.segs.push(r.seg);
+    }
+    for (const g of groups.values()) g.segs.sort((a, b) => (a.BEG_MP || 0) - (b.BEG_MP || 0));
+
+    // sort the routes themselves by the active sort key
+    const arr = [...groups.values()];
+    const sk = state.sort.key, dir = state.sort.dir;
+    const routeKey = (g) => sk === 'RTE_NAME' ? g.sec.name : sk === 'station' ? (g.segs[0] ? g.segs[0].BEG_MP : 0)
+      : sk === 'ROUTE_IDENT' ? g.sec.route_id : (ripOf(g.sec)[sk] != null ? ripOf(g.sec)[sk] : (g.segs[0] ? g.segs[0][sk] : null));
+    arr.sort((a, b) => {
+      let x = routeKey(a), y = routeKey(b); const xn = x == null, yn = y == null;
+      if (xn && yn) return 0; if (xn) return 1; if (yn) return -1;
+      if (typeof x === 'number' && typeof y === 'number') return (x - y) * dir;
+      return String(x).localeCompare(String(y)) * dir;
+    });
+
+    const ncols = 1 + cols.length;   // indent + segment columns
+    // page by rendered rows (banner = 1, expanded route adds its segments), so
+    // expanding a 250-segment route can't blow up the DOM
+    const budget = state.limit;
+    let used = 0, shownRoutes = 0, body = '';
+    for (const g of arr) {
+      const exp = state.expanded.has(g.sec.id);
+      const cost = 1 + (exp ? g.segs.length : 0);
+      if (shownRoutes > 0 && used + cost > budget) break;
+      body += bannerRow(g, exp, ncols);
+      if (exp) for (const seg of g.segs) body += segRow(seg, g.sec, cols);
+      used += cost; shownRoutes++;
+    }
+
+    return { total: arr.length, shown: shownRoutes, unit: 'routes', grouped: true, html:
       '<table style="width:100%;border-collapse:collapse;font:13px system-ui"><thead><tr>'
+      + '<th style="position:sticky;top:0;background:#f7f9fb;z-index:1;border-bottom:1px solid #e3e8ee;width:22px"></th>'
       + cols.map((k) => th(k, meta(k).l)).join('')
-      + '<th style="position:sticky;top:0;background:#f7f9fb;border-bottom:1px solid #e3e8ee;width:30px"></th>'
       + '</tr></thead><tbody>' + body + '</tbody></table>' };
+  }
+  function bannerRow(g, exp, ncols) {
+    const sec = g.sec;
+    const totalSegs = (state.segsByRoute.get(sec.route_id) || []).length;
+    const note = g.segs.length === totalSegs ? (g.segs.length + ' seg') : (g.segs.length + ' of ' + totalSegs);
+    return '<tr data-exp="' + esc(sec.id) + '" style="cursor:pointer;background:#f5f8fb;border-top:2px solid #e6ecf2">'
+      + '<td colspan="' + ncols + '" style="padding:6px 9px">'
+      + '<div style="display:flex;align-items:center;gap:10px">'
+      + '<span style="color:#5b6673;width:12px;flex:0 0 auto">' + (exp ? '▾' : '▸') + '</span>'
+      + '<span style="font:700 12px \'IBM Plex Mono\',monospace;color:#0B3D66;flex:0 0 auto">' + esc(sec.route_id || '—') + '</span>'
+      + '<span style="flex:1 1 auto;min-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#12233b;font-weight:600">' + esc(sec.name) + '</span>'
+      + '<span style="font:12px \'IBM Plex Mono\',monospace;color:#5b6673;flex:0 0 auto">' + mpRange(g.segs, sec) + ' mi</span>'
+      + pcrDot(ripOf(sec).PCR)
+      + conditionBar(g.segs)
+      + '<span style="font-size:11.5px;color:#8a949f;flex:0 0 auto;min-width:52px;text-align:right">' + note + '</span>'
+      + '<button data-goto="' + esc(sec.id) + '" data-nodetail="1" title="Show on map" style="border:0;background:transparent;cursor:pointer;font-size:14px;flex:0 0 auto">🗺</button>'
+      + '</div></td></tr>';
+  }
+  function segRow(seg, sec, cols) {
+    return '<tr data-detail="' + esc(sec.id) + '" data-seg="' + (seg.BEG_MP != null ? seg.BEG_MP : '') + '" style="border-bottom:1px solid #f4f6f8;cursor:pointer">'
+      + '<td style="width:22px"></td>'
+      + cols.map((k) => {
+        if (k === 'station') return '<td style="padding:5px 9px;font:12px \'IBM Plex Mono\',monospace;color:#5b6673;white-space:nowrap;text-align:right">'
+          + (seg.BEG_MP != null ? seg.BEG_MP.toFixed(2) : '?') + '–' + (seg.END_MP != null ? seg.END_MP.toFixed(2) : '?') + '</td>';
+        return cell(k, condVal({ seg, sec }, k));
+      }).join('')
+      + '</tr>';
   }
   function geometryTable() {
     const rows = sortRows(filteredAssets(), (s, k) => k === 'ROUTE_IDENT' ? s.route_id : k === 'RTE_NAME' ? s.name : assetVal(s, k));
@@ -655,6 +759,8 @@
         '<button data-tab="' + t + '" style="border:1px solid #e3e8ee;border-bottom:1px solid ' + (state.tab === t ? '#fff' : '#e3e8ee') + ';background:'
         + (state.tab === t ? '#fff' : '#eef1f4') + ';color:#12233b;border-radius:10px 10px 0 0;padding:8px 15px;cursor:pointer;font:700 13px system-ui;position:relative;top:1px">' + l + '</button>').join('') + '</div>'
       + '<div style="display:flex;gap:6px;padding-bottom:5px">'
+      + (state.tab === 'conditions' ? '<button id="rip-expand-all" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">Expand all</button>'
+          + '<button id="rip-collapse-all" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">Collapse all</button>' : '')
       + (state.tab === 'custom' ? '<button id="rip-cust-add" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">+ Field</button>' : '')
       + ((state.tab === 'assets' || state.tab === 'conditions') ? '<button id="rip-cols-btn" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">Columns ▾</button>' : '')
       + (state.tab !== 'custom' ? '<button id="rip-csv" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">⬇ CSV</button>' : '')
@@ -664,8 +770,8 @@
       + '<div style="max-height:60vh;overflow:auto">' + tbl.html + '</div>'
       + (tbl.total !== undefined ?
         '<div style="padding:9px 13px;border-top:1px solid #eef1f4;display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:#5b6673">'
-        + '<span>Showing <b>' + tbl.shown.toLocaleString() + '</b> of <b>' + tbl.total.toLocaleString() + '</b></span>'
-        + (tbl.shown < tbl.total ? '<button id="rip-more" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 13px;cursor:pointer;font:600 12.5px system-ui;color:#12233b">Show ' + Math.min(PAGE, tbl.total - tbl.shown) + ' more</button>' : '<span style="color:#b8c0c8">end of list</span>')
+        + '<span>Showing <b>' + tbl.shown.toLocaleString() + '</b> of <b>' + tbl.total.toLocaleString() + '</b>' + (tbl.unit ? ' ' + tbl.unit : '') + '</span>'
+        + (tbl.shown < tbl.total ? '<button id="rip-more" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 13px;cursor:pointer;font:600 12.5px system-ui;color:#12233b">Show more</button>' : '<span style="color:#b8c0c8">end of list</span>')
         + '</div>' : '')
       + '</div></div>';
 
@@ -696,6 +802,19 @@
     const cols = $('rip-cols-btn'); if (cols) cols.onclick = () => colChooser(cols);
     const csv = $('rip-csv'); if (csv) csv.onclick = exportCSV;
     const add = $('rip-cust-add'); if (add) add.onclick = addCustomField;
+    const exAll = $('rip-expand-all'); if (exAll) exAll.onclick = () => {
+      const g = new Map();
+      for (const r of filteredConditions()) g.set(r.sec.id, 1);
+      state.expanded = new Set(g.keys()); state.limit = PAGE; render();
+    };
+    const colAll = $('rip-collapse-all'); if (colAll) colAll.onclick = () => { state.expanded.clear(); state.limit = PAGE; render(); };
+
+    host.querySelectorAll('[data-exp]').forEach((tr) => tr.onclick = (e) => {
+      if (e.target.closest('[data-nodetail]')) return;
+      const id = tr.dataset.exp;
+      if (state.expanded.has(id)) state.expanded.delete(id); else state.expanded.add(id);
+      render();
+    });
 
     host.querySelectorAll('[data-scope]').forEach((cb) => cb.onchange = (e) => {
       e.stopPropagation();
@@ -752,7 +871,11 @@
     state, attach, render, save,
     show: () => { if (window.showModule) window.showModule('rip'); render(); },
     segmentsFor: (rid) => state.segsByRoute.get(rid) || [],
-    colorFor, norm, METRICS, LOT_METRICS,
+    METRICS, LOT_METRICS, BAND,
+    // RIP condition band colours (shared with the map bands)
+    scoreColor, iriColor,
+    bandColor: (metric, v) => (metric === 'IRI' ? iriColor(v) : scoreColor(v)),
+    legend: (metric) => (metric === 'IRI' ? IRI_LEGEND : SCORE_LEGEND),
     metric: () => state.metric, hasPark: () => !!state.bundle,
   };
 })();
