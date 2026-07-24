@@ -13450,6 +13450,9 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     // readable over the colouring instead of being covered by it.
     return L.marker([cLat, cLng], {
       interactive: false, keyboard: false, pane: 'markerPane',
+      // Labels are top-level: above the condition bands (pane 450) and above
+      // other markers, so a label is never buried by something drawn later.
+      zIndexOffset: 10000,
       icon: L.divIcon({
         className: 'rw-routeid-label',
         html: `<div style="${css};font:700 9.5px 'IBM Plex Mono',monospace;padding:1px 4px;border-radius:5px;white-space:nowrap;transform:${tx};box-shadow:0 1px 3px rgba(0,0,0,.22)">${rid}</div>`,
@@ -13603,15 +13606,35 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
 
       // Try offsets around the anchor; prefer clear of both, then merely clear
       // of other labels, and give up rather than stack chips on each other.
+      // For a polygon, offsets sized off its projected bounds are tried first:
+      // a fixed ring can't clear a lot whose centroid is hundreds of px from
+      // any edge, which is what left lot labels sitting on their own fill.
+      let candidates = LABEL_OFFSETS;
+      if (isArea) {
+        let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+        for (const g of geo) {
+          if (g.x < minx) minx = g.x; if (g.x > maxx) maxx = g.x;
+          if (g.y < miny) miny = g.y; if (g.y > maxy) maxy = g.y;
+        }
+        const pad = 9;
+        candidates = [
+          [0, (miny - pt.y) - pad - h / 2],          // just above the lot
+          [0, (maxy - pt.y) + pad + h / 2],          // just below
+          [(maxx - pt.x) + pad + w / 2, 0],          // just right
+          [(minx - pt.x) - pad - w / 2, 0],          // just left
+        ].concat(LABEL_OFFSETS);
+      }
+
       let chosen = null, fallback = null;
-      for (const [dx, dy] of LABEL_OFFSETS) {
+      for (const [dx, dy] of candidates) {
         const r = rectAt(dx, dy);
         if (hitsPlaced(r)) continue;
         if (!hitsGeom(r) && !hitsArea(r)) { chosen = { dx, dy, r }; break; }
         if (!fallback) fallback = { dx, dy, r };
       }
-      const pick = chosen || fallback;
-      if (!pick) continue;
+      // Never drop a label: an unlabelled route is worse than an overlapping
+      // one, so fall back to the least-bad spot and finally the centroid.
+      const pick = chosen || fallback || { dx: 0, dy: 0, r: rectAt(0, 0) };
       const lbl = _routeIdLabel(c.sec, c.selected, pick.dx, pick.dy);
       if (lbl) { placed.push(pick.r); grp.addLayer(lbl); count++; }
     }
