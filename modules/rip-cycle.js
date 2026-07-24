@@ -81,6 +81,9 @@
 
   // ---- cache ------------------------------------------------------------
   const DB = 'roadwalk2_rip_c7', STORE = 'c7';
+  // Bump when the cached record shape changes so old caches (e.g. pre-geometry)
+  // are refetched instead of silently reused.
+  const SCHEMA = 2;
   function idb() {
     return new Promise((res, rej) => {
       const rq = indexedDB.open(DB, 1);
@@ -102,7 +105,7 @@
       const db = await idb();
       await new Promise((res, rej) => {
         const tx = db.transaction(STORE, 'readwrite');
-        tx.objectStore(STORE).put({ park, segs, fetchedAt, parking: [...(parking || new Map())] }, park);
+        tx.objectStore(STORE).put({ park, segs, fetchedAt, ver: SCHEMA, parking: [...(parking || new Map())] }, park);
         tx.oncomplete = res; tx.onerror = () => rej(tx.error);
       });
     } catch (_) {}
@@ -162,7 +165,7 @@
     try {
       if (!opts.refresh) {
         const c = await readCache(park);
-        if (c && c.segs && c.segs.length) {
+        if (c && c.ver === SCHEMA && c.segs && c.segs.length) {
           state.all = c.segs; state.fetchedAt = c.fetchedAt;
           state.parking = new Map(c.parking || []); index(); state.loading = false;
           if (typeof opts.onchange === 'function') opts.onchange();
