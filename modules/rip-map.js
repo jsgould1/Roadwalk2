@@ -433,7 +433,9 @@
     if (!panel) {
       panel = document.createElement('div');
       panel.id = 'rip-band-panel';
-      panel.style.cssText = 'position:absolute;left:calc(34px + 10px);z-index:640;'
+      // Clear of the 48px "+ Add Feature" button (which is wider than the 34px
+      // stack and protrudes), so the panel doesn't sit under it.
+      panel.style.cssText = 'position:absolute;left:60px;z-index:640;'
         + 'background:var(--paper,#fff);border:1px solid var(--rule,#cfd6dd);border-radius:10px;'
         + 'box-shadow:0 2px 10px rgba(0,0,0,.18);padding:10px 12px;font-family:system-ui;'
         + 'width:232px;display:none;pointer-events:auto';
