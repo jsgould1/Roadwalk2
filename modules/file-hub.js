@@ -95,6 +95,7 @@
     },
     newRoute() { click('dash-new-section-btn'); },
     scopePins() { if (window.RW2ScopePins) window.RW2ScopePins.show(); else toast('Scope Pins module not ready', true); },
+    inScopeList() { if (window.RW2InScopeList) window.RW2InScopeList.show(); else toast('In-Scope list module not ready', true); },
     scopeData() { if (window.RW2RouteData) window.RW2RouteData.showPanel(); else toast('Scope Data module not ready', true); },
     geojson() { if (window.RW2GeoIO) window.RW2GeoIO.show(); else toast('GeoJSON module not ready', true); },
     table() { if (window.RW2SectionsTable) window.RW2SectionsTable.show(); else toast('Table module not ready', true); },
@@ -166,6 +167,7 @@
         tile('importPark', '🗺️', 'Import Shapes', 'Shapefiles / KMZ → routes & lots'),
         tile('newRoute', '✏️', 'New Route', 'Draw a road or lot on the map'),
         tile('scopePins', '📍', 'Scope Pins', 'KMZ pins → Route IDs + in-scope'),
+        tile('inScopeList', '✅', 'In-Scope List', 'XLSX of Route IDs → set in scope'),
       ].join(''))}
 
          ${group('Data & components', [

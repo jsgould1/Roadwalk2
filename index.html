@@ -110,6 +110,7 @@
 <script src="modules/sections-table.js" defer></script>
 <script src="modules/route-menu.js?v=7" defer></script>
 <script src="modules/scope-pins.js" defer></script>
+<script src="modules/scope-inscope.js?v=1" defer></script>
 <script src="modules/geo-io.js?v=3" defer></script>
 <script src="modules/scope-data.js?v=2" defer></script>
 <script src="modules/file-hub.js?v=4" defer></script>
@@ -13441,10 +13442,12 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     const cLat = al.reduce((a, p) => a + p[0], 0) / al.length;
     const cLng = al.reduce((a, p) => a + p[1], 0) / al.length;
     // Black on translucent white — reads over both imagery and the condition
-    // bands without competing with either.
+    // bands without competing with either. In-scope routes get an orange
+    // border so the scope is visible at a glance among the black-bordered rest.
+    const inScope = !!(sec && sec.in_scope);
     const css = selected
-      ? 'background:rgba(255,255,255,.94);color:#000;border:1.2px solid #000'
-      : 'background:rgba(255,255,255,.86);color:#111;border:1px solid #111';
+      ? 'background:rgba(255,255,255,.94);color:#000;border:1.4px solid ' + (inScope ? '#e8710a' : '#000')
+      : 'background:rgba(255,255,255,.86);color:#111;border:' + (inScope ? '1.4px solid #e8710a' : '1px solid #111');
     const tx = `translate(calc(-50% + ${Math.round(dx || 0)}px), calc(-50% + ${Math.round(dy || 0)}px))`;
     // markerPane (600) sits above the condition-band pane (450), so labels stay
     // readable over the colouring instead of being covered by it.
