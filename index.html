@@ -13213,15 +13213,17 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       if (!isAreaSection) {
       // Build the station-tick layer (50' "+", 100' "55+00") tied to CL visibility
       buildStationTicks(sec);
-      // Other sections, drawn dashed for "all" mode. Built here so the new
-      // section's neighbors render alongside its centerline.
-      buildOtherSectionLines(sec);
       // Honor the user's last centerline-visibility preference (default off).
       // Legacy values: '0' / '1' map to mode 0 / 1. New value: '2' = all.
-      try {
-        const pref = parseInt(localStorage.getItem('rw_show_centerline') || '0', 10);
-        applyCenterlineVisibility(isFinite(pref) ? pref : 0);
-      } catch (_) { applyCenterlineVisibility(0); }
+      let _pref = 0;
+      try { _pref = parseInt(localStorage.getItem('rw_show_centerline') || '0', 10); if (!isFinite(_pref)) _pref = 0; } catch (_) { _pref = 0; }
+      // Other-section dashed centerlines are ONLY for "all" mode (2). Building
+      // one huge polyline per section regardless of mode froze big parks like
+      // BLRI (168 sections × the whole 470-mi parkway). Built + viewport-culled
+      // only when actually shown.
+      state.mapLayers._clActiveSec = sec;
+      if (_pref === 2) buildOtherSectionLines(sec);
+      applyCenterlineVisibility(_pref);
 
       // --- STA hover tooltip -----------------------------------------------
       // On mousemove over the hit corridor, project the cursor perpendicular
@@ -13400,6 +13402,17 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       // Route labels are deconflicted in screen space, so they must be
       // re-placed whenever the view changes.
       state.map.on('zoomend moveend', () => { try { _renderRouteLabels(); } catch (_) {} });
+      // Station ticks and other-section centerlines are viewport-culled, so
+      // re-cull them to the new view as the user pans/zooms (debounced) — this
+      // keeps huge sections like the Blue Ridge Parkway responsive.
+      state.map.on('zoomend moveend', () => {
+        clearTimeout(state.map._rwCullTimer);
+        state.map._rwCullTimer = setTimeout(() => {
+          try { if (_rwStaSec) buildStationTicks(_rwStaSec); } catch (_) {}
+          try { if ((state.mapLayers._clMode || 0) === 2) buildOtherSectionLines(state.mapLayers._clActiveSec); } catch (_) {}
+          try { if (state.mapLayers._subSec) { _renderSubsectionOutlines(state.mapLayers._subSec); _renderRouteLabels(); } } catch (_) {}
+        }, 160);
+      });
     }
     _renderWidthLabels();
     _renderSectionInfoCards();
@@ -13465,6 +13478,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   }
 
   function _renderSubsectionOutlines(currentSec) {
+    if (currentSec) state.mapLayers._subSec = currentSec; else currentSec = state.mapLayers._subSec;
     if (state.mapLayers.subOutlines) {
       try { state.mapLayers.subOutlines.remove(); } catch (_) {}
       state.mapLayers.subOutlines = null;
@@ -13482,14 +13496,25 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const grp = L.layerGroup();
     let n = 0;
-    // Show EVERY other section faded (roads = dashed line, parking = dashed
+    // Show other sections faded (roads = solid black outline, parking = dashed
     // polygon); tap one to make it the active section. Name-chips only on
     // smaller parks to avoid clutter/lag on big ones (e.g. CAHA ~1900 routes).
     const showChips = SECTIONS.length <= 60;
+    // Viewport-cull + cap: a big park (BLRI = 168 sections spanning the whole
+    // 470-mi parkway) would otherwise draw every section's full geometry on
+    // each open and freeze. Only outlines meeting the padded view are drawn.
+    let _ob = null; try { _ob = state.map.getBounds().pad(0.5); } catch (_) {}
+    const OUTLINE_CAP = 120;
+    const _meets = (al) => {
+      if (!_ob) return true;
+      for (let i = 0; i < al.length; i += Math.max(1, (al.length / 24) | 0)) if (_ob.contains(al[i])) return true;
+      return false;
+    };
     SECTIONS.forEach(sub => {
-      if (!sub || sub.id === curId) return;
+      if (!sub || sub.id === curId || n >= OUTLINE_CAP) return;
       const align = sub.alignment;
       if (!Array.isArray(align) || align.length < 2) return;
+      if (!_meets(align)) return;
       const isArea = sub.type === 'area' && align.length >= 3;
       // Non-selected sections read as a plain solid black outline so the
       // condition colouring underneath stays legible (no competing hue, no
@@ -24606,6 +24631,15 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     state.mapLayers._clMode    = mode;
     state.mapLayers._clVisible = mode > 0;   // legacy boolean kept for other callers
     const showActive = mode > 0;
+    // Other-section lines are built lazily: only when the user actually turns on
+    // "all" mode (2), and only for sections near the viewport.
+    if (mode === 2 && !(state.mapLayers.otherSectionLines || []).length) {
+      buildOtherSectionLines(state.mapLayers._clActiveSec);
+    } else if (mode !== 2 && (state.mapLayers.otherSectionLines || []).length) {
+      (state.mapLayers.otherSectionLines || []).forEach(l => { try { l.remove(); } catch (_) {} });
+      (state.mapLayers.otherSectionHits || []).forEach(l => { try { l.remove(); } catch (_) {} });
+      state.mapLayers.otherSectionLines = []; state.mapLayers.otherSectionHits = [];
+    }
     if (state.mapLayers.alignment) {
       state.mapLayers.alignment.setStyle({ opacity: showActive ? 0.9 : 0 });
     }
@@ -24658,10 +24692,22 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     state.mapLayers.otherSectionLines = [];
     state.mapLayers.otherSectionHits  = [];
     if (!state.map) return;
+    // Only draw other sections whose extent meets the padded viewport, capped —
+    // a big park has hundreds of sections spanning the whole park, and drawing
+    // them all (each thousands of vertices) is what froze BLRI.
+    let _b = null; try { _b = state.map.getBounds().pad(0.5); } catch (_) {}
+    const CAP = 80; let _n = 0;
+    const inView = (al) => {
+      if (!_b) return true;
+      for (let i = 0; i < al.length; i += Math.max(1, (al.length / 24) | 0)) if (_b.contains(al[i])) return true;
+      return false;
+    };
     (window.SECTIONS || []).forEach(function (otherSec) {
-      if (!otherSec || otherSec === activeSec) return;
-      if (otherSec.type === 'area') return;   // areas have no centerline
+      if (otherSec === activeSec || _n >= CAP) return;
+      if (!otherSec || otherSec.type === 'area') return;   // areas have no centerline
       if (!Array.isArray(otherSec.alignment) || otherSec.alignment.length < 2) return;
+      if (!inView(otherSec.alignment)) return;
+      _n++;
       // Wide invisible hit corridor for easier tap targets on touch devices.
       const hit = L.polyline(otherSec.alignment, {
         color: '#000',
@@ -24702,31 +24748,55 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   // Build the 50'/100' station-tick layer for the section alignment.
   // 100' = full "55+00" label centered above the alignment;
   //  50' = a small "+" tick at midpoint between two full labels.
+  // Station ticks along the ACTIVE section only. On a 57-mile Blue Ridge
+  // Parkway sub-district (~6,000 ticks) building them all — and calling
+  // pointAt() from the start each step (O(n^2)) — froze the app. This walks
+  // the alignment once, emits a tick at each 50 ft, and only creates a marker
+  // for ticks inside the padded viewport (capped), so an open section shows
+  // stationing for just the visible stretch. _rwStaSec + a moveend hook
+  // re-place them as you pan/zoom. Station numbering is unchanged: STA/MP still
+  // start at the section's own beginning.
+  let _rwStaSec = null;
   function buildStationTicks(sec) {
+    _rwStaSec = sec || _rwStaSec;
     if (state.mapLayers.stationTicks) {
       try { state.map.removeLayer(state.mapLayers.stationTicks); } catch (_) {}
       state.mapLayers.stationTicks = null;
     }
-    if (!sec || !sec.alignment || sec.alignment.length < 2) return;
-    const totalLen = polylineLengthFt(sec.alignment);
+    const s = _rwStaSec;
+    if (!s || !s.alignment || s.alignment.length < 2 || !state.map) return;
+    const align = s.alignment;
     const group = L.layerGroup();
-    const STEP = 50;
-    for (let sta = 0; sta <= totalLen; sta += STEP) {
-      const ll = pointAt(sec.alignment, sta);
-      if (!ll) continue;
-      const isHundred = (sta % 100) === 0;
-      const html = isHundred
-        ? `<div class="rw-sta-label">${(sta/100|0)}+${String(Math.round(sta % 100)).padStart(2,'0')}</div>`
-        : `<div class="rw-sta-tick">+</div>`;
-      const icon = L.divIcon({
-        className: 'rw-sta-icon',
-        html,
-        iconSize: isHundred ? null : [0, 0],
-        iconAnchor: isHundred ? [22, 18] : [0, 0],
-      });
-      group.addLayer(L.marker(ll, { icon, interactive: false }));
+    const STEP = 50, CAP = 600;
+    let bounds = null;
+    try { bounds = state.map.getBounds().pad(0.35); } catch (_) {}
+    let acc = 0, nextSta = 0, count = 0;
+    for (let i = 1; i < align.length && count < CAP; i++) {
+      const a = align[i - 1], b = align[i];
+      const segFt = havFt(a, b);
+      if (segFt <= 0) continue;
+      while (nextSta <= acc + segFt && count < CAP) {
+        const t = (nextSta - acc) / segFt;
+        const lat = a[0] + (b[0] - a[0]) * t, lng = a[1] + (b[1] - a[1]) * t;
+        if (!bounds || bounds.contains([lat, lng])) {
+          const isHundred = (nextSta % 100) === 0;
+          const html = isHundred
+            ? `<div class="rw-sta-label">${(nextSta / 100 | 0)}+${String(Math.round(nextSta % 100)).padStart(2, '0')}</div>`
+            : `<div class="rw-sta-tick">+</div>`;
+          const icon = L.divIcon({
+            className: 'rw-sta-icon', html,
+            iconSize: isHundred ? null : [0, 0],
+            iconAnchor: isHundred ? [22, 18] : [0, 0],
+          });
+          group.addLayer(L.marker([lat, lng], { icon, interactive: false }));
+          count++;
+        }
+        nextSta += STEP;
+      }
+      acc += segFt;
     }
     state.mapLayers.stationTicks = group;
+    refreshStationTicksVisibility();
   }
   // Restore + wire the EYE-CL toggle button. Cycles 0 → 1 → 2 → 0:
   //   0 = off, 1 = active section only, 2 = all sections (dashed others).
