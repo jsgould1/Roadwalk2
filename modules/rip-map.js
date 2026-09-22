@@ -296,8 +296,16 @@
   function draw() {
     const m = getMap(), R = RIP();
     if (!m || !R || !R.hasPark()) { clear(); paint(); return; }
-    if (!m.getPane(PANE)) { m.createPane(PANE); }
-    m.getPane(PANE).style.zIndex = PANE_Z;
+    // The band pane must live INSIDE the map's rotate pane, or it won't turn
+    // with the map: leaflet-rotate only rotates rotatePane's children (tiles,
+    // overlays). A plain createPane() parents to mapPane, which stays upright —
+    // that's why the PCR colouring didn't rotate while the centerlines did.
+    if (!m.getPane(PANE)) { m.createPane(PANE, (m._rotate && m._rotatePane) ? m._rotatePane : undefined); }
+    const bandPane = m.getPane(PANE);
+    if (m._rotate && m._rotatePane && bandPane.parentNode !== m._rotatePane) {
+      m._rotatePane.appendChild(bandPane);   // move an already-created pane in
+    }
+    bandPane.style.zIndex = PANE_Z;
     clear();
     state.capped = false;
     state.gated = false;
@@ -391,6 +399,14 @@
     m._ripWired = true;
     m.on('moveend zoomend', () => { if (state.mode !== 'off') draw(); });
     m.on('mouseout', hideHover);
+    // Existing bands rotate with the pane, but 'rotate' fires no moveend, so
+    // refresh the viewport cull once a rotation settles (debounced — rotating
+    // drags fire many events).
+    m.on('rotate', () => {
+      if (state.mode === 'off') return;
+      clearTimeout(m._ripRotTimer);
+      m._ripRotTimer = setTimeout(draw, 220);
+    });
   }
 
   // ---- control ----------------------------------------------------------
