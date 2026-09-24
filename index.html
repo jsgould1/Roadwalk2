@@ -24627,8 +24627,9 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   }
   // Show station ticks only when the user is zoomed in enough — i.e. when
   // the engineering scale is at or below STATION_TICK_MAX_SCALE_FT.
-  // 500 ft/in shows stationing one zoom level further out than the old 250.
-  const STATION_TICK_MAX_SCALE_FT = 500;
+  // 1000 ft/in shows stationing two zoom levels further out than the old 250
+  // (each doubling of ft/in is one Leaflet zoom level).
+  const STATION_TICK_MAX_SCALE_FT = 1000;
   function shouldShowStationTicks() {
     return !!state.mapLayers._clVisible && mapScaleFtPerInch() <= STATION_TICK_MAX_SCALE_FT;
   }
