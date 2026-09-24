@@ -5235,6 +5235,21 @@ body.rw-sld-photo-dragging .strip-pin {
   transform: translate(-50%, -50%);
   display: inline-block;
 }
+/* Milepost badge — one per whole mile, distinct from the STA labels. */
+.rw-sta-icon .rw-mp-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: #fff;
+  background: #0B3D66;
+  border: 1px solid rgba(255,255,255,0.85);
+  padding: 1px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.45);
+}
 
 /* Hover tooltip for feature layers (built via marker.bindTooltip) */
 .leaflet-tooltip.rw-feature-tooltip {
@@ -24612,7 +24627,8 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   }
   // Show station ticks only when the user is zoomed in enough — i.e. when
   // the engineering scale is at or below STATION_TICK_MAX_SCALE_FT.
-  const STATION_TICK_MAX_SCALE_FT = 250;
+  // 500 ft/in shows stationing one zoom level further out than the old 250.
+  const STATION_TICK_MAX_SCALE_FT = 500;
   function shouldShowStationTicks() {
     return !!state.mapLayers._clVisible && mapScaleFtPerInch() <= STATION_TICK_MAX_SCALE_FT;
   }
@@ -24767,28 +24783,59 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     if (!s || !s.alignment || s.alignment.length < 2 || !state.map) return;
     const align = s.alignment;
     const group = L.layerGroup();
-    const STEP = 50, CAP = 600;
+    // Full STA label every 200'; a "+" at the 50/100/150 in-between ticks.
+    const STEP = 50, LABEL = 200, CAP = 800;
+    const totalLen = polylineLengthFt(align);
+    // Milepost labels at each whole mile. Positions are proportional to the
+    // section's MP range so they land where the real mileposts are even when
+    // the drawn geometry length differs slightly from (mpEnd-mpStart)*5280.
+    const mp0 = (typeof s.mpStart === 'number') ? s.mpStart : ((s.rip && s.rip.BEG_MP_DCV != null) ? s.rip.BEG_MP_DCV : null);
+    const mp1 = (typeof s.mpEnd === 'number') ? s.mpEnd : ((s.rip && s.rip.END_MP_DCV != null) ? s.rip.END_MP_DCV : null);
+    const haveMp = (mp0 != null && mp1 != null && mp1 > mp0 && totalLen > 0);
+    const mpMarks = [];   // { sta, m } sorted by sta
+    if (haveMp) {
+      for (let m = Math.ceil(mp0 - 1e-6); m <= Math.floor(mp1 + 1e-6); m++) {
+        mpMarks.push({ sta: ((m - mp0) / (mp1 - mp0)) * totalLen, m });
+      }
+    }
     let bounds = null;
     try { bounds = state.map.getBounds().pad(0.35); } catch (_) {}
-    let acc = 0, nextSta = 0, count = 0;
+    const at = (a, b, ft, acc, segFt) => {
+      const t = (ft - acc) / segFt;
+      return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    };
+    let acc = 0, nextSta = 0, mpi = 0, count = 0;
     for (let i = 1; i < align.length && count < CAP; i++) {
       const a = align[i - 1], b = align[i];
       const segFt = havFt(a, b);
       if (segFt <= 0) continue;
+      // Milepost labels whose station falls inside this segment.
+      while (mpi < mpMarks.length && mpMarks[mpi].sta <= acc + segFt && count < CAP) {
+        const mk = mpMarks[mpi]; mpi++;
+        if (mk.sta < acc - 0.5) continue;
+        const ll = at(a, b, mk.sta, acc, segFt);
+        if (!bounds || bounds.contains(ll)) {
+          group.addLayer(L.marker(ll, {
+            icon: L.divIcon({ className: 'rw-sta-icon', html: `<div class="rw-mp-label">MP ${mk.m}</div>`, iconSize: null, iconAnchor: [26, 9] }),
+            interactive: false, zIndexOffset: 5000,
+          }));
+          count++;
+        }
+      }
+      // Station ticks / labels.
       while (nextSta <= acc + segFt && count < CAP) {
-        const t = (nextSta - acc) / segFt;
-        const lat = a[0] + (b[0] - a[0]) * t, lng = a[1] + (b[1] - a[1]) * t;
-        if (!bounds || bounds.contains([lat, lng])) {
-          const isHundred = (nextSta % 100) === 0;
-          const html = isHundred
+        const ll = at(a, b, nextSta, acc, segFt);
+        if (!bounds || bounds.contains(ll)) {
+          const isLabel = (nextSta % LABEL) === 0;
+          const html = isLabel
             ? `<div class="rw-sta-label">${(nextSta / 100 | 0)}+${String(Math.round(nextSta % 100)).padStart(2, '0')}</div>`
             : `<div class="rw-sta-tick">+</div>`;
           const icon = L.divIcon({
             className: 'rw-sta-icon', html,
-            iconSize: isHundred ? null : [0, 0],
-            iconAnchor: isHundred ? [22, 18] : [0, 0],
+            iconSize: isLabel ? null : [0, 0],
+            iconAnchor: isLabel ? [22, 18] : [0, 0],
           });
-          group.addLayer(L.marker([lat, lng], { icon, interactive: false }));
+          group.addLayer(L.marker(ll, { icon, interactive: false }));
           count++;
         }
         nextSta += STEP;
