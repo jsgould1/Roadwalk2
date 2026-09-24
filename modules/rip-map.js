@@ -25,6 +25,13 @@
   const RIP = () => window.RW2RIP;
   const CYC = () => window.RW2RIPCycle;
 
+  // Open the section that owns a route ident (so clicking its coloured band
+  // selects it and shows its stationing).
+  function selectByRid(rid) {
+    const sec = (RW().SECTIONS || []).find((s) => s.route_id === rid);
+    if (sec && RW().showView) RW().showView('field', sec.id);
+  }
+
   const MINZOOM = { 0.1: 12, 0.02: 14 };
   const MAXPATHS = 6000;
   const PANE = 'ripBands';
@@ -360,6 +367,10 @@
           pl.on('mouseover', (e) => showHover(bandHover(band), e));
           pl.on('mousemove', placeHover);
           pl.on('mouseout', hideHover);
+          // The bands are interactive (for hover) and sit above the section hit
+          // corridors, so without this a click on a coloured road hits the band
+          // and never reaches the section — the road looked unselectable.
+          pl.on('click', () => selectByRid(band.rid));
           pl.addTo(layer);
           if (++n >= MAXPATHS) { state.capped = true; break; }
         }
@@ -384,6 +395,7 @@
         pg.on('mouseover', (e) => showHover(lotHover(sec), e));
         pg.on('mousemove', placeHover);
         pg.on('mouseout', hideHover);
+        pg.on('click', () => { if (sec && RW().showView) RW().showView('field', sec.id); });
         pg.addTo(layer);
         if (++n >= MAXPATHS) { state.capped = true; break; }
       }

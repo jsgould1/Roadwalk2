@@ -103,7 +103,7 @@
 <script src="modules/aecom-toggle.js?v=2" defer></script>
 <script src="modules/rip-data.js?v=8" defer></script>
 <script src="modules/rip-import.js?v=2" defer></script>
-<script src="modules/rip-map.js?v=13" defer></script>
+<script src="modules/rip-map.js?v=14" defer></script>
 <script src="modules/rip-pathweb.js?v=2" defer></script>
 <script src="modules/rip-cycle.js?v=5" defer></script>
 <script src="modules/scope-assign.js?v=5" defer></script>
@@ -13460,15 +13460,27 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       default: return rid;
     }
   }
+  // The point a section's label anchors to. For a road this is the MIDDLE
+  // VERTEX of the alignment — a point actually on the line — not the average of
+  // all vertices, which for a curved/L-shaped road lands off the road entirely
+  // and made labels drift toward (and look like they belonged to) the wrong
+  // section. Areas use the centroid (inside the polygon).
+  function _labelAnchor(sec) {
+    const al = sec && sec.alignment;
+    if (!Array.isArray(al) || !al.length) return null;
+    if (sec.type === 'area') {
+      return [al.reduce((a, p) => a + p[0], 0) / al.length, al.reduce((a, p) => a + p[1], 0) / al.length];
+    }
+    return al[Math.floor(al.length / 2)];
+  }
   // dx/dy nudge the chip off the geometry (see _renderRouteLabels), so the
   // label sits beside its line/polygon rather than on top of it.
   function _routeIdLabel(sec, selected, dx, dy) {
-    const al = sec && sec.alignment;
-    if (!Array.isArray(al) || !al.length) return null;
+    const anchor = _labelAnchor(sec);
+    if (!anchor) return null;
     const rid = _labelText(sec);
     if (!rid) return null;
-    const cLat = al.reduce((a, p) => a + p[0], 0) / al.length;
-    const cLng = al.reduce((a, p) => a + p[1], 0) / al.length;
+    const cLat = anchor[0], cLng = anchor[1];
     // Black on translucent white — reads over both imagery and the condition
     // bands without competing with either. In-scope routes get an orange
     // border so the scope is visible at a glance among the black-bordered rest.
@@ -13584,14 +13596,13 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   // diagonals, then progressively further out. The centroid itself is last.
   // Rings grow outward so a chip can escape even a large parking polygon,
   // whose centroid can sit well inside the fill. Centroid itself is last.
+  // Kept small so a road label sits right next to its line. (Large parking
+  // polygons get their own bounds-sized candidates in _renderRouteLabels, so
+  // this ring only needs to clear a thin centerline.)
   const LABEL_OFFSETS = [
-    [0, -15], [0, 15], [20, 0], [-20, 0],
-    [17, -13], [-17, -13], [17, 13], [-17, 13],
-    [0, -30], [0, 30], [36, 0], [-36, 0],
-    [30, -24], [-30, -24], [30, 24], [-30, 24],
-    [0, -52], [0, 52], [62, 0], [-62, 0],
-    [48, -38], [-48, -38], [48, 38], [-48, 38],
-    [0, -80], [0, 80], [92, 0], [-92, 0],
+    [0, -12], [0, 12], [15, 0], [-15, 0],
+    [13, -10], [-13, -10], [13, 10], [-13, 10],
+    [0, -22], [0, 22], [24, 0], [-24, 0],
     [0, 0],
   ];
   function _renderRouteLabels() {
@@ -13608,8 +13619,9 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       if (count >= MAX_LABELS) break;
       const al = c.sec && c.sec.alignment;
       if (!Array.isArray(al) || !al.length) continue;
-      const cLat = al.reduce((a, p) => a + p[0], 0) / al.length;
-      const cLng = al.reduce((a, p) => a + p[1], 0) / al.length;
+      const anchor = _labelAnchor(c.sec);
+      if (!anchor) continue;
+      const cLat = anchor[0], cLng = anchor[1];
       if (!bounds.contains([cLat, cLng])) continue;
       const txt = _labelText(c.sec);
       if (!txt) continue;
@@ -24628,8 +24640,11 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   // Show station ticks only when the user is zoomed in enough — i.e. when
   // the engineering scale is at or below STATION_TICK_MAX_SCALE_FT.
   // 1000 ft/in shows stationing two zoom levels further out than the old 250
-  // (each doubling of ft/in is one Leaflet zoom level).
+  // (each doubling of ft/in is one Leaflet zoom level). The in-between 50/100/
+  // 150 "+" ticks only draw when closer (<= 250 ft/in); further out they crowd
+  // the line, so only the 200' STA labels + milepost badges show.
   const STATION_TICK_MAX_SCALE_FT = 1000;
+  const STATION_PLUS_MAX_SCALE_FT = 250;
   function shouldShowStationTicks() {
     return !!state.mapLayers._clVisible && mapScaleFtPerInch() <= STATION_TICK_MAX_SCALE_FT;
   }
@@ -24801,6 +24816,8 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     }
     let bounds = null;
     try { bounds = state.map.getBounds().pad(0.35); } catch (_) {}
+    // "+" ticks only when zoomed in enough; labels + mileposts always.
+    const showPlus = mapScaleFtPerInch() <= STATION_PLUS_MAX_SCALE_FT;
     const at = (a, b, ft, acc, segFt) => {
       const t = (ft - acc) / segFt;
       return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
@@ -24823,21 +24840,23 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
           count++;
         }
       }
-      // Station ticks / labels.
+      // Station ticks / labels. "+" ticks are skipped when zoomed out.
       while (nextSta <= acc + segFt && count < CAP) {
-        const ll = at(a, b, nextSta, acc, segFt);
-        if (!bounds || bounds.contains(ll)) {
-          const isLabel = (nextSta % LABEL) === 0;
-          const html = isLabel
-            ? `<div class="rw-sta-label">${(nextSta / 100 | 0)}+${String(Math.round(nextSta % 100)).padStart(2, '0')}</div>`
-            : `<div class="rw-sta-tick">+</div>`;
-          const icon = L.divIcon({
-            className: 'rw-sta-icon', html,
-            iconSize: isLabel ? null : [0, 0],
-            iconAnchor: isLabel ? [22, 18] : [0, 0],
-          });
-          group.addLayer(L.marker(ll, { icon, interactive: false }));
-          count++;
+        const isLabel = (nextSta % LABEL) === 0;
+        if (isLabel || showPlus) {
+          const ll = at(a, b, nextSta, acc, segFt);
+          if (!bounds || bounds.contains(ll)) {
+            const html = isLabel
+              ? `<div class="rw-sta-label">${(nextSta / 100 | 0)}+${String(Math.round(nextSta % 100)).padStart(2, '0')}</div>`
+              : `<div class="rw-sta-tick">+</div>`;
+            const icon = L.divIcon({
+              className: 'rw-sta-icon', html,
+              iconSize: isLabel ? null : [0, 0],
+              iconAnchor: isLabel ? [22, 18] : [0, 0],
+            });
+            group.addLayer(L.marker(ll, { icon, interactive: false }));
+            count++;
+          }
         }
         nextSta += STEP;
       }
