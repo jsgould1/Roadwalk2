@@ -813,6 +813,51 @@
     return Promise.resolve(null);
   }
 
+  // ── Photos tab: hover-to-magnify ──────────────────────────────────────────
+  // Hovering a thumbnail pops up a large floating preview of the whole photo
+  // (click still opens the full lightbox). A single shared element follows the
+  // cursor and is clamped to the viewport. A token guards async image loads so
+  // a slow (offloaded) restore can't show after the pointer has moved away.
+  let _hvEl = null, _hvImg = null, _hvTok = 0, _hvMouse = { x: 0, y: 0 };
+  function _hvEnsure() {
+    if (_hvEl) return _hvEl;
+    _hvEl = document.createElement('div');
+    _hvEl.id = 'rip-photo-hover';
+    _hvEl.style.cssText = 'position:fixed;z-index:100000;pointer-events:none;display:none;'
+      + 'background:#fff;border:1px solid #c7ccd2;border-radius:10px;box-shadow:0 10px 32px rgba(0,0,0,.35);padding:4px';
+    _hvImg = document.createElement('img');
+    _hvImg.style.cssText = 'display:block;max-width:46vw;max-height:72vh;object-fit:contain;border-radius:6px';
+    _hvImg.onload = () => photoHoverMove(_hvMouse);
+    _hvEl.appendChild(_hvImg);
+    document.body.appendChild(_hvEl);
+    return _hvEl;
+  }
+  function photoHoverShow(el, e) {
+    if (e) { _hvMouse = { x: e.clientX, y: e.clientY }; }
+    const id = el.getAttribute('data-rip-go');
+    _hvEnsure();
+    const tok = ++_hvTok;
+    const show = (url) => { if (url && tok === _hvTok) { _hvImg.src = url; _hvEl.style.display = 'block'; photoHoverMove(_hvMouse); } };
+    const api = window._RW && window._RW.geophotos;
+    const p = api && api.get && api.get(id);
+    if (p && p.dataUrl) show(p.dataUrl);
+    else resolvePhotoImg(id).then(show).catch(() => {});
+  }
+  function photoHoverMove(e) {
+    if (e) { _hvMouse = { x: e.clientX, y: e.clientY }; }
+    if (!_hvEl || _hvEl.style.display === 'none') return;
+    const pad = 18, vw = window.innerWidth, vh = window.innerHeight;
+    const w = _hvEl.offsetWidth || 360, h = _hvEl.offsetHeight || 270;
+    let x = _hvMouse.x + pad, y = _hvMouse.y + pad;
+    if (x + w > vw - 8) x = _hvMouse.x - pad - w;   // flip left near the right edge
+    if (x < 8) x = 8;
+    if (y + h > vh - 8) y = vh - 8 - h;             // clamp within the viewport
+    if (y < 8) y = 8;
+    _hvEl.style.left = x + 'px';
+    _hvEl.style.top = y + 'px';
+  }
+  function photoHoverHide() { _hvTok++; if (_hvEl) _hvEl.style.display = 'none'; }
+
   function _flashBtn(btn, txt) { if (!btn) return; const o = btn.textContent; btn.textContent = txt; setTimeout(() => { btn.textContent = o; }, 1100); }
   // Export watermark is automatic (applied on save/copy/print); the global
   // toggle lets it be turned off. Stored/displayed images stay clean.
@@ -1259,7 +1304,13 @@
     // Photos tab — thumbnail click → open the image in a lightbox (view large,
     // open in a new tab, or save). Map-jump lives on a button in the lightbox.
     const photoGet = (id) => { const api = window._RW && window._RW.geophotos; return api && api.get && api.get(id); };
-    host.querySelectorAll('[data-rip-go]').forEach((el) => el.onclick = () => openLightbox(el.getAttribute('data-rip-go')));
+    host.querySelectorAll('[data-rip-go]').forEach((el) => {
+      el.onclick = () => openLightbox(el.getAttribute('data-rip-go'));
+      // Hover → floating magnified preview of the whole photo.
+      el.onmouseenter = (e) => photoHoverShow(el, e);
+      el.onmousemove = (e) => photoHoverMove(e);
+      el.onmouseleave = () => photoHoverHide();
+    });
     // Per-card quick actions: copy to clipboard, save/download, fly to on map.
     host.querySelectorAll('[data-rip-copy]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); copyPhoto(b.getAttribute('data-rip-copy'), b); });
     host.querySelectorAll('[data-rip-save]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); savePhoto(b.getAttribute('data-rip-save')); });
