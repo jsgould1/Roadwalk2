@@ -219,10 +219,15 @@
     var npsHtml = o.npsLogo ? '<img class="nps-logo" src="' + o.npsLogo + '" alt="NPS">' : '';
     var aecomHtml = o.aecomLogo ? '<img class="ftr-logo' + (o.aecomBlack ? ' blk' : '') + '" src="' + o.aecomLogo + '" alt="AECOM">' : '<span class="ftr-aecom">AECOM</span>';
     var parkHtml = esc(o.park).replace(/ National\b/, '<br>National');
+    // section title: route/lot ID on row 1, the route name on row 2 (wraps)
+    var sci = o.secTitle.indexOf(' — ');
+    var scHtml = (sci >= 0)
+      ? '<span class="sc-id">' + esc(o.secTitle.slice(0, sci)) + '</span><span class="sc-nm">' + esc(o.secTitle.slice(sci + 3)) + '</span>'
+      : '<span class="sc-nm">' + esc(o.secTitle) + '</span>';
     return '<section class="page" style="--rows:' + lay.rows + '">' +
       '<div class="phdr">' + npsHtml +
       '<span class="pk">' + parkHtml + '</span>' +
-      '<span class="sc">' + esc(o.secTitle) + '</span></div>' +
+      '<span class="sc">' + scHtml + '</span></div>' +
       '<div class="grid">' + cells + '</div>' +
       '<div class="pftr">' + aecomHtml +
       '<div class="pftr-r"><span class="rid">' + esc(o.routeId) + '</span><span class="pg">Page ' + o.pageIdx + ' of ' + o.pageCount + '</span></div>' +
@@ -244,7 +249,9 @@
       '.phdr{display:flex;align-items:center;gap:10px;border-bottom:2px solid #16315E;padding-bottom:6px;margin-bottom:9px;flex:0 0 auto}' +
       '.phdr .nps-logo{height:48px;width:auto;object-fit:contain;flex:0 0 auto}' +
       '.phdr .pk{font-weight:800;font-size:17px;color:#16315E;letter-spacing:.2px;line-height:1.12;white-space:normal}' +
-      '.phdr .sc{font-weight:600;font-size:12px;color:#5b6673;flex:1 1 auto;text-align:right}' +
+      '.phdr .sc{flex:1 1 auto;text-align:right;align-self:flex-end;display:flex;flex-direction:column;align-items:flex-end;line-height:1.15}' +
+      '.phdr .sc .sc-id{font-weight:800;font-size:11.5px;color:#16315E;letter-spacing:.4px}' +
+      '.phdr .sc .sc-nm{font-weight:700;font-size:14px;color:#5b6673;white-space:normal}' +
       '.grid{flex:1 1 auto;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(var(--rows),1fr);gap:0.16in;min-height:0}' +
       '.cell{display:flex;flex-direction:column;min-height:0;min-width:0}' +
       '.cell.full{grid-column:1 / -1}' +
