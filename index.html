@@ -13742,9 +13742,11 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       label: 'Esri Aerial',
       // offlineTileLayer serves cached tiles first (see the offline tile cache
       // engine); falls back to online fetch when a tile is not cached.
+      // Native Esri tiles to z21; z22–23 are client-side digital zoom (upscaled)
+      // so you can keep zooming in past the imagery's native resolution.
       build: () => (window.offlineTileLayer || L.tileLayer)(
         'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        { maxZoom: 19, attribution: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics' },
+        { maxZoom: 23, maxNativeZoom: 21, attribution: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics' },
         'esri_aerial'
       ),
     },
@@ -13752,7 +13754,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       label: 'Esri Street',
       build: () => (window.offlineTileLayer || L.tileLayer)(
         'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
-        { maxZoom: 19, attribution: 'Tiles © Esri' },
+        { maxZoom: 23, maxNativeZoom: 21, attribution: 'Tiles © Esri' },
         'esri_street'
       ),
     },
@@ -13760,7 +13762,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       label: 'Esri Topo',
       build: () => (window.offlineTileLayer || L.tileLayer)(
         'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
-        { maxZoom: 19, attribution: 'Tiles © Esri' },
+        { maxZoom: 23, maxNativeZoom: 21, attribution: 'Tiles © Esri' },
         'esri_topo'
       ),
     },
