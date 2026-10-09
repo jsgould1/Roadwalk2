@@ -189,16 +189,20 @@
   function importGroups(groups) {
     var g = geo(); if (!g) return;
     var names = Object.keys(groups);
-    var totalSets = names.length, i = 0;
+    var totalSets = names.length, i = 0, added = 0;
     status('Importing ' + names.length + ' set(s)…');
     names.reduce(function (pr, name) {
       return pr.then(function () {
         i++; status('Importing set ' + i + '/' + totalSets + ': "' + name + '" (' + groups[name].length + ' files)…');
-        return g.importFiles(groups[name], name);
+        return g.importFiles(groups[name], name).then(function (n) { added += (n || 0); });
       });
     }, Promise.resolve()).then(function () {
-      status('Imported ' + names.length + ' set(s).');
+      status('Imported ' + added + ' photo(s) in ' + names.length + ' set(s).');
       renderSets();
+      // Walk the user straight into auto-tagging what they just imported.
+      if (added && window.RW2PhotoTag && window.RW2PhotoTag.wizard) {
+        try { window.RW2PhotoTag.wizard({ added: added }); } catch (e) {}
+      }
     });
   }
 

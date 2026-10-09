@@ -101,7 +101,7 @@
 <script src="modules/library.js" defer></script>
 <script src="modules/route-tools.js" defer></script>
 <script src="modules/aecom-toggle.js?v=2" defer></script>
-<script src="modules/rip-data.js?v=10" defer></script>
+<script src="modules/rip-data.js?v=13" defer></script>
 <script src="modules/rip-import.js?v=2" defer></script>
 <script src="modules/rip-map.js?v=14" defer></script>
 <script src="modules/rip-pathweb.js?v=2" defer></script>
@@ -117,10 +117,10 @@
 <script src="modules/snapshots.js" defer></script>
 <script src="modules/map-tools.js?v=4" defer></script>
 <script src="modules/flip-sta.js" defer></script>
-<script src="modules/photo-sets.js?v=1" defer></script>
-<script src="modules/photo-autotag.js?v=1" defer></script>
+<script src="modules/photo-sets.js?v=2" defer></script>
+<script src="modules/photo-autotag.js?v=2" defer></script>
 <script src="modules/photo-route-view.js?v=1" defer></script>
-<script src="modules/photo-report.js?v=1" defer></script>
+<script src="modules/photo-report.js?v=3" defer></script>
 
 <style>
 /* ============================================================
@@ -37700,7 +37700,30 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         updateCount();
       });
     });
+    // Heart toggle — include this photo in the photo report (same flag as the
+    // map double-click and the RIP Photos tab / report builder).
+    var heart = document.createElement('button');
+    heart.className = 'gp-pop-save';
+    heart.title = 'Heart = include this photo in the photo report';
+    function paintHeart() {
+      heart.textContent = p.hearted ? '♥ Hearted' : '♡ Heart';
+      heart.style.background = p.hearted ? '#C85A2B' : '';
+      heart.style.color = p.hearted ? '#fff' : '';
+    }
+    paintHeart();
+    heart.addEventListener('click', function () {
+      p.hearted = !p.hearted;
+      dbPut(p).then(function () {
+        var el = m.getElement(); if (el) el.classList.toggle('gp-hearted', !!p.hearted);
+        paintHeart();
+        if (window.RW2PhotoReport && document.getElementById('pr-overlay')
+            && document.getElementById('pr-overlay').classList.contains('on')) {
+          try { window.RW2PhotoReport.open(); } catch (e) {}
+        }
+      });
+    });
     btns.appendChild(save);
+    btns.appendChild(heart);
     btns.appendChild(del);
 
     // --- Asset-tagging actions ----------------------------------------
@@ -37712,6 +37735,27 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     groupBtn.textContent = '👥 Group with another photo';
     actions.appendChild(tagBtn);
     actions.appendChild(groupBtn);
+    // Auto-tag THIS photo to the RIP route/lot it sits on/near (50 ft).
+    if (window.RW2PhotoTag && window.RW2PhotoTag.tagPhotos) {
+      var rtBtn = document.createElement('button');
+      rtBtn.textContent = '📍 Tag to route';
+      rtBtn.title = 'Tag this photo to the nearest RIP road/lot within 50 ft';
+      rtBtn.addEventListener('click', function () {
+        rtBtn.textContent = 'Tagging…'; rtBtn.disabled = true;
+        window.RW2PhotoTag.tagPhotos(50, [p.id]).then(function (r) {
+          if (r && r.ok && p.rip_route) {
+            m.setTooltipContent(tipFor(p));
+            showDetail(wrap, p, m, fromGallery);     // rebuild popup → shows the route line
+            var pop = m.getPopup(); if (pop) pop.update();
+            if (window.RW2RouteView && window.RW2RouteView.refresh) { try { window.RW2RouteView.refresh(); } catch (e) {} }
+          } else {
+            rtBtn.textContent = r && !r.ok ? (r.reason.length > 22 ? 'Open a park first' : r.reason) : 'No route within 50 ft';
+            rtBtn.disabled = false;
+          }
+        }, function () { rtBtn.textContent = '📍 Tag to route'; rtBtn.disabled = false; });
+      });
+      actions.appendChild(rtBtn);
+    }
     if (p.linked_pin_id) {
       var unTagBtn = document.createElement('button');
       unTagBtn.className = 'muted';
@@ -38032,8 +38076,14 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     if (upBtn && fileInp) {
       upBtn.addEventListener('click', function () { fileInp.click(); });
       fileInp.addEventListener('change', function () {
-        handleFiles(fileInp.files);
+        var res = handleFiles(fileInp.files);
         fileInp.value = '';
+        // After import, walk the user into auto-tagging what they just added.
+        if (res && res.then) res.then(function (n) {
+          if (n && window.RW2PhotoTag && window.RW2PhotoTag.wizard) {
+            try { window.RW2PhotoTag.wizard({ added: n }); } catch (e) {}
+          }
+        });
       });
     }
     dbAll().then(function (recs) {

@@ -143,6 +143,7 @@
   const state = {
     park: null, bundle: null, segments: [], segsByRoute: new Map(),
     tab: 'assets', metric: 'PCR', limit: PAGE,
+    photoSize: (function () { try { return localStorage.getItem('rw_rip_photo_size') || 'med'; } catch (e) { return 'med'; } })(),
     sort: { key: 'ROUTE_IDENT', dir: 1 },
     q: '', kind: 'all', scope: 'all', facets: {}, range: { min: '', max: '' },
     cols: { assets: DEFAULT_COLS.assets.slice(), conditions: DEFAULT_COLS.conditions.slice() },
@@ -762,6 +763,9 @@
     });
 
     const OFF = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#ECE8DC"/><text x="40" y="38" font-family="system-ui" font-size="22" text-anchor="middle" fill="#9BA0A8">☁</text><text x="40" y="56" font-family="system-ui" font-size="9" text-anchor="middle" fill="#9BA0A8">offloaded</text></svg>');
+    const SZ = { small: { m: 96, h: 72 }, med: { m: 140, h: 104 }, lg: { m: 190, h: 142 }, xl: { m: 260, h: 195 }, xxl: { m: 360, h: 270 } };
+    const sz = SZ[state.photoSize] || SZ.med;
+    const BTN = 'width:22px;height:22px;border-radius:50%;border:0;cursor:pointer;font-size:12px;line-height:1;padding:0;box-shadow:0 1px 3px rgba(0,0,0,.25)';
     let html = '<div style="padding:12px 14px">';
     keys.forEach((k) => {
       const g = groups.get(k);
@@ -770,16 +774,20 @@
         + '<div style="font:700 13px system-ui;color:#12233b;padding:6px 0;border-bottom:2px solid ' + (g.kind === 'route' ? '#0B3D66' : g.kind === 'lot' ? '#5A8F3E' : '#cfd6dd') + ';margin-bottom:9px">'
         + esc(g.title) + ' <span style="font-weight:600;color:#8a949f">· ' + g.photos.length + ' photo' + (g.photos.length === 1 ? '' : 's')
         + ' · <span data-rip-hcount="' + esc(k) + '">♥ ' + hearted + '</span></span></div>'
-        + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px">';
+        + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(' + sz.m + 'px,1fr));gap:8px">';
       g.photos.forEach((p) => {
         const src = p.dataUrl || OFF;
         const cap = (p.description || '');
         html += '<div data-rip-card="' + esc(p.id) + '" '
           + 'style="position:relative;border:1px solid #e3e8ee;border-radius:7px;overflow:hidden;background:#fff' + (p.hearted ? ';box-shadow:0 0 0 2px #C85A2B' : '') + '">'
-          + '<div data-rip-go="' + esc(p.id) + '" title="Jump to this photo on the map" style="height:84px;cursor:pointer;background:#f4f1e8 center/cover no-repeat;background-image:url(' + src + ')"></div>'
-          + '<button data-rip-heart="' + esc(p.id) + '" title="Heart = include in photo report" '
-          + 'style="position:absolute;top:4px;right:4px;width:24px;height:24px;border-radius:50%;border:0;cursor:pointer;font-size:13px;line-height:1;'
-          + (p.hearted ? 'background:#C85A2B;color:#fff' : 'background:rgba(255,255,255,.9);color:#C85A2B') + ';box-shadow:0 1px 3px rgba(0,0,0,.25)">' + (p.hearted ? '♥' : '♡') + '</button>'
+          + '<div data-rip-go="' + esc(p.id) + '" title="Jump to this photo on the map" style="height:' + sz.h + 'px;cursor:pointer;background:#f4f1e8 center/cover no-repeat;background-image:url(' + src + ')"></div>'
+          + '<div style="position:absolute;top:4px;right:4px;display:flex;gap:4px">'
+          + '<button data-rip-heart="' + esc(p.id) + '" title="Heart = include in photo report" style="' + BTN
+          + (p.hearted ? ';background:#C85A2B;color:#fff' : ';background:rgba(255,255,255,.92);color:#C85A2B') + '">' + (p.hearted ? '♥' : '♡') + '</button>'
+          + '<button data-rip-copy="' + esc(p.id) + '" title="Copy image to clipboard" style="' + BTN + ';background:rgba(255,255,255,.92);color:#0B3D66">⧉</button>'
+          + '<button data-rip-save="' + esc(p.id) + '" title="Save / download image" style="' + BTN + ';background:rgba(255,255,255,.92);color:#0B3D66">⤓</button>'
+          + '<button data-rip-fly="' + esc(p.id) + '" title="Fly to this photo on the map" style="' + BTN + ';background:rgba(255,255,255,.92);color:#0B3D66">🗺</button>'
+          + '</div>'
           + '<input data-rip-cap="' + esc(p.id) + '" value="' + esc(cap) + '" placeholder="Add description…" '
           + 'style="width:100%;box-sizing:border-box;border:0;border-top:1px solid #eef1f4;font:500 10.5px system-ui;color:#33414f;padding:4px 5px">'
           + '</div>';
@@ -788,6 +796,107 @@
     });
     html += '</div>';
     return { html };
+  }
+
+  // Resolve a photo's image data URL (restores it from the blob store if the
+  // photo's set is currently offloaded).
+  function resolvePhotoImg(id) {
+    const api = window._RW && window._RW.geophotos;
+    const p = api && api.get && api.get(id);
+    if (p && p.dataUrl) return Promise.resolve(p.dataUrl);
+    if (window.RW2PhotoSets && window.RW2PhotoSets.imageFor) return window.RW2PhotoSets.imageFor(id);
+    return Promise.resolve(null);
+  }
+
+  function _flashBtn(btn, txt) { if (!btn) return; const o = btn.textContent; btn.textContent = txt; setTimeout(() => { btn.textContent = o; }, 1100); }
+  // Copy a photo's image to the clipboard (PNG via canvas for broad support).
+  function copyPhoto(id, btn) {
+    resolvePhotoImg(id).then((src) => {
+      if (!src) { _flashBtn(btn, '∅'); return; }
+      if (!(navigator.clipboard && window.ClipboardItem)) { _flashBtn(btn, '✕'); return; }
+      const im = new Image();
+      im.onload = () => {
+        try {
+          const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight;
+          c.getContext('2d').drawImage(im, 0, 0);
+          c.toBlob((blob) => {
+            if (!blob) { _flashBtn(btn, '✕'); return; }
+            navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(() => _flashBtn(btn, '✓'), () => _flashBtn(btn, '✕'));
+          }, 'image/png');
+        } catch (e) { _flashBtn(btn, '✕'); }
+      };
+      im.onerror = () => _flashBtn(btn, '✕');
+      im.src = src;
+    });
+  }
+  // Download a photo's image file.
+  function savePhoto(id) {
+    const api = window._RW && window._RW.geophotos; const p = api && api.get && api.get(id);
+    resolvePhotoImg(id).then((src) => {
+      if (!src) return;
+      const nm = (p && p._name && /\.(jpe?g|png|gif|webp)$/i.test(p._name)) ? p._name : ('photo-' + id + '.jpg');
+      const a = document.createElement('a'); a.href = src; a.download = nm;
+      document.body.appendChild(a); a.click(); a.remove();
+    });
+  }
+
+  // Full-screen lightbox: view the stored image large, open in a tab, or save.
+  let _lbSrc = null;
+  function openLightbox(id) {
+    const api = window._RW && window._RW.geophotos;
+    const p = api && api.get && api.get(id); if (!p) return;
+    let ov = document.getElementById('rip-lightbox');
+    if (!ov) {
+      ov = document.createElement('div');
+      ov.id = 'rip-lightbox';
+      ov.style.cssText = 'position:fixed;inset:0;z-index:4300;background:rgba(10,12,16,.88);display:none;flex-direction:column;align-items:center;justify-content:center;padding:56px 18px 18px';
+      const btn = 'border:1px solid #fff;background:transparent;color:#fff;border-radius:7px;padding:6px 11px;cursor:pointer;font:600 12.5px system-ui;text-decoration:none;display:inline-block';
+      ov.innerHTML =
+        '<div style="position:absolute;top:0;left:0;right:0;display:flex;gap:9px;align-items:center;padding:12px 16px;color:#fff;font:600 13px system-ui;background:linear-gradient(rgba(0,0,0,.55),transparent)">'
+        + '<span id="riplb-title" style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>'
+        + '<a id="riplb-dl" download style="' + btn + '">⤓ Save</a>'
+        + '<button id="riplb-tab" style="' + btn + '">↗ Open in tab</button>'
+        + '<button id="riplb-map" style="' + btn + '">🗺 Map</button>'
+        + '<button id="riplb-close" style="' + btn + '">✕ Close</button></div>'
+        + '<img id="riplb-img" alt="" style="max-width:94vw;max-height:76vh;object-fit:contain;border-radius:6px;background:#1b1d22">'
+        + '<div id="riplb-meta" style="color:#cdd3da;font:500 12px system-ui;margin-top:12px;text-align:center;max-width:92vw;line-height:1.5"></div>';
+      document.body.appendChild(ov);
+      const close = () => { ov.style.display = 'none'; };
+      ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+      document.getElementById('riplb-close').onclick = close;
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ov.style.display !== 'none') close(); });
+      document.getElementById('riplb-tab').onclick = () => { if (_lbSrc) { const w = window.open(''); if (w) w.document.write('<title>Photo</title><img src="' + _lbSrc + '" style="max-width:100%">'); } };
+    }
+    // title + meta
+    const title = p.rip_route ? (p.rip_route + (p.rip_route_name ? ' · ' + p.rip_route_name : '')) : (p._name || 'Field photo');
+    document.getElementById('riplb-title').textContent = title;
+    const bits = [];
+    if (p.rip_route) {
+      let rm = p.rip_route + (p.rip_route_fmss ? ' · FMSS ' + p.rip_route_fmss : '');
+      if (p.rip_route_mp != null) rm += ' · MP ' + Number(p.rip_route_mp).toFixed(2);
+      bits.push(rm);
+    }
+    if (isFinite(Number(p.lat)) && isFinite(Number(p.lng))) bits.push(Number(p.lat).toFixed(6) + ', ' + Number(p.lng).toFixed(6) + (p.bearing != null && isFinite(Number(p.bearing)) ? ' · ' + Math.round(p.bearing) + '°' : ''));
+    if (p.ts) { const d = new Date(p.ts); if (!isNaN(d.getTime())) bits.push(d.toLocaleString()); }
+    if (p.description) bits.push('“' + p.description + '”');
+    document.getElementById('riplb-meta').innerHTML = bits.map((b) => esc(b)).join('<br>');
+    // map jump
+    document.getElementById('riplb-map').onclick = () => {
+      ov.style.display = 'none';
+      if (RW().openMap) RW().openMap(); else if (window.showModule) window.showModule('map');
+      setTimeout(() => { const m = window._RW && window._RW.state && window._RW.state.map; if (m && isFinite(p.lat) && isFinite(p.lng)) m.setView([p.lat, p.lng], Math.max(m.getZoom() || 0, 18)); }, 250);
+    };
+    // image (restores offloaded sets)
+    const imgEl = document.getElementById('riplb-img');
+    const dl = document.getElementById('riplb-dl');
+    imgEl.src = ''; _lbSrc = null;
+    document.getElementById('riplb-meta').insertAdjacentHTML('beforeend', '');
+    ov.style.display = 'flex';
+    resolvePhotoImg(id).then((src) => {
+      if (!src) { imgEl.alt = 'Image offloaded — turn its photo set back on to view.'; return; }
+      _lbSrc = src; imgEl.src = src;
+      dl.href = src; dl.download = (p._name || ('photo-' + p.id)) + (/\.(jpe?g|png|gif|webp)$/i.test(p._name || '') ? '' : '.jpg');
+    });
   }
 
   // Kick off a Cycle 7 fetch for the current park when it's needed (Cycle 7
@@ -979,7 +1088,7 @@
       + '</div>';
 
     host.innerHTML =
-      '<div style="max-width:1240px;margin:0 auto;padding:16px 16px 40px;font-family:system-ui">'
+      '<div style="max-width:' + (state.tab === 'photos' ? '100%' : '1240px') + ';margin:0 auto;padding:16px 16px 40px;font-family:system-ui">'
 
       + '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:14px">'
       + '<div><div style="font-size:12px;color:#8a949f;text-transform:uppercase;letter-spacing:.6px">RIP Cycle ' + esc(state.bundle.cycle) + '</div>'
@@ -1035,10 +1144,13 @@
       + (state.tab === 'custom' ? '<button id="rip-cust-add" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">+ Field</button>' : '')
       + ((state.tab === 'assets' || state.tab === 'conditions') ? '<button id="rip-cols-btn" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">Columns ▾</button>' : '')
       + (state.tab !== 'custom' && state.tab !== 'photos' ? '<button id="rip-csv" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">⬇ CSV</button>' : '')
+      + (state.tab === 'photos' ? '<span style="font-size:12px;color:#8a949f">Size</span><select id="rip-photo-size" style="border:1px solid #d3dae1;border-radius:8px;padding:4px 7px;font:12.5px system-ui;background:#fff">'
+          + [['small', 'Small'], ['med', 'Medium'], ['lg', 'Large'], ['xl', 'X-Large'], ['xxl', 'XX-Large']].map((o) => '<option value="' + o[0] + '"' + (state.photoSize === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('')
+          + '</select>' : '')
       + '</div></div>'
 
       + '<div style="background:#fff;border:1px solid #e3e8ee;border-radius:0 12px 12px 12px;overflow:hidden">'
-      + '<div style="max-height:60vh;overflow:auto">' + tbl.html + '</div>'
+      + '<div style="max-height:' + (state.tab === 'photos' ? '76vh' : '60vh') + ';overflow:auto">' + tbl.html + '</div>'
       + (tbl.total !== undefined ?
         '<div style="padding:9px 13px;border-top:1px solid #eef1f4;display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:#5b6673">'
         + '<span>Showing <b>' + tbl.shown.toLocaleString() + '</b> of <b>' + tbl.total.toLocaleString() + '</b>' + (tbl.unit ? ' ' + tbl.unit : '') + (tbl.note ? ' · <span style="color:#b26a00">' + esc(tbl.note) + '</span>' : '') + '</span>'
@@ -1058,6 +1170,10 @@
     host.querySelectorAll('[data-scope-f]').forEach((b) => b.onclick = () => set(() => { state.scope = b.dataset.scopeF; }));
     host.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => set(() => { state.tab = b.dataset.tab; }));
 
+    // Photos tab: thumbnail size selector.
+    const psz = $('rip-photo-size');
+    if (psz) psz.onchange = () => { state.photoSize = psz.value; try { localStorage.setItem('rw_rip_photo_size', psz.value); } catch (e) {} render(); };
+
     // Assets → Photos: jump to the Photos tab, focused on this route's section.
     host.querySelectorAll('[data-photos]').forEach((b) => b.onclick = (e) => {
       e.stopPropagation();
@@ -1065,15 +1181,18 @@
       set(() => { state.tab = 'photos'; });
     });
 
-    // Photos tab — thumbnail click → fly to the photo on the map.
+    // Photos tab — thumbnail click → open the image in a lightbox (view large,
+    // open in a new tab, or save). Map-jump lives on a button in the lightbox.
     const photoGet = (id) => { const api = window._RW && window._RW.geophotos; return api && api.get && api.get(id); };
-    host.querySelectorAll('[data-rip-go]').forEach((el) => el.onclick = () => {
-      const p = photoGet(el.getAttribute('data-rip-go')); if (!p) return;
+    host.querySelectorAll('[data-rip-go]').forEach((el) => el.onclick = () => openLightbox(el.getAttribute('data-rip-go')));
+    // Per-card quick actions: copy to clipboard, save/download, fly to on map.
+    host.querySelectorAll('[data-rip-copy]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); copyPhoto(b.getAttribute('data-rip-copy'), b); });
+    host.querySelectorAll('[data-rip-save]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); savePhoto(b.getAttribute('data-rip-save')); });
+    host.querySelectorAll('[data-rip-fly]').forEach((b) => b.onclick = (e) => {
+      e.stopPropagation();
+      const p = photoGet(b.getAttribute('data-rip-fly')); if (!p) return;
       if (RW().openMap) RW().openMap(); else if (window.showModule) window.showModule('map');
-      setTimeout(() => {
-        const m = window._RW && window._RW.state && window._RW.state.map;
-        if (m && isFinite(p.lat) && isFinite(p.lng)) m.setView([p.lat, p.lng], Math.max(m.getZoom() || 0, 18));
-      }, 250);
+      setTimeout(() => { const m = window._RW && window._RW.state && window._RW.state.map; if (m && isFinite(p.lat) && isFinite(p.lng)) m.setView([p.lat, p.lng], Math.max(m.getZoom() || 0, 18)); }, 250);
     });
     // Photos tab — heart toggle (updates in place, no full re-render).
     host.querySelectorAll('[data-rip-heart]').forEach((btn) => btn.onclick = (e) => {

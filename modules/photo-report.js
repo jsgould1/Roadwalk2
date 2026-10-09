@@ -79,6 +79,16 @@
     if (!total) { status('Heart at least one photo first.'); return; }
     status('Preparing ' + total + ' photo(s)…');
 
+    // Fill STA/MP for photos tagged before station support (route geometry is
+    // already cached after tagging; station() returns null if not yet built).
+    if (window.RW2PhotoTag && window.RW2PhotoTag.station) {
+      secs.forEach(function (s) { s.photos.forEach(function (p) {
+        if (p.rip_route && (p.rip_route_mp == null || p.rip_route_sta == null) && isFinite(Number(p.lat)) && isFinite(Number(p.lng))) {
+          try { var st = window.RW2PhotoTag.station(Number(p.lat), Number(p.lng), p.rip_route); if (st) { p.rip_route_sta = st.sta; p.rip_route_mp = st.mp; } } catch (e) {}
+        }
+      }); });
+    }
+
     // resolve every image (incl. offloaded) up front
     var ids = []; secs.forEach(function (s) { s.photos.forEach(function (p) { ids.push(p.id); }); });
     Promise.all(ids.map(function (id) { return imageFor(id).then(function (d) { return { id: id, d: d }; }); }))
@@ -86,11 +96,12 @@
         var img = {}; var missing = 0;
         res.forEach(function (r) { if (r.d) img[r.id] = r.d; else missing++; });
         var park = ($('pr-park') && $('pr-park').value) || _parkName || (rip() && rip().state && rip().state.bundle && rip().state.bundle.park) || '';
+        var wmOn = !$('pr-wm') || $('pr-wm').checked;
         var pagesHtml = '';
         secs.forEach(function (s) {
           var usable = s.photos.filter(function (p) { return img[p.id]; });
           chunk6(usable).forEach(function (pagePhotos) {
-            pagesHtml += pageHtml(park, s.title, pagePhotos, img);
+            pagesHtml += pageHtml(park, s.title, pagePhotos, img, wmOn);
           });
         });
         if (!pagesHtml) { status('No printable images (all offloaded with no stored copy?).'); return; }
@@ -99,13 +110,41 @@
       });
   }
 
-  function pageHtml(park, secTitle, photos, img) {
+  // Survey station from along-route feet: 1234 ft → "12+34".
+  function fmtSta(ft) { var s = Math.max(0, Math.round(ft)); return Math.floor(s / 100) + '+' + String(s % 100).padStart(2, '0'); }
+
+  // Watermark content as ordered lines (top row = route + FMSS, then STA/MP,
+  // then GPS + bearing, then capture date/time).
+  function watermarkLines(p) {
+    var lines = [];
+    if (p.rip_route) {
+      lines.push(p.rip_route + (p.rip_route_fmss ? '  ·  FMSS ' + p.rip_route_fmss : ''));
+      var sm = [];
+      if (p.rip_route_sta != null) sm.push('STA ' + fmtSta(p.rip_route_sta));
+      if (p.rip_route_mp != null) sm.push('MP ' + Number(p.rip_route_mp).toFixed(2));
+      if (sm.length) lines.push(sm.join('  ·  '));
+    } else if (p.rip_lot) {
+      lines.push('🅿 ' + p.rip_lot + (p.rip_lot_fmss ? '  ·  FMSS ' + p.rip_lot_fmss : ''));
+    }
+    var g = [];
+    if (isFinite(Number(p.lat)) && isFinite(Number(p.lng))) g.push(Number(p.lat).toFixed(6) + ', ' + Number(p.lng).toFixed(6));
+    if (p.bearing != null && isFinite(Number(p.bearing))) g.push(Math.round(p.bearing) + '°');
+    if (g.length) lines.push(g.join('  ·  '));
+    if (p.ts) { var d = new Date(p.ts); if (!isNaN(d.getTime())) lines.push(d.toLocaleString()); }
+    return lines;
+  }
+
+  function pageHtml(park, secTitle, photos, img, wmOn) {
     var lay = layoutFor(photos.length);
     var cells = photos.map(function (p, i) {
       var full = lay.fulls[i] ? ' full' : '';
       var cap = (p.description || '').trim();
+      var wmLines = wmOn ? watermarkLines(p) : [];
+      var wmHtml = wmLines.length ? '<div class="wm">' + wmLines.map(function (l, li) {
+        return '<div' + (li === 0 ? ' class="wm0"' : '') + '>' + esc(l) + '</div>';
+      }).join('') + '</div>' : '';
       return '<div class="cell' + full + '">' +
-        '<div class="imgbox"><img src="' + img[p.id] + '"></div>' +
+        '<div class="imgbox"><img src="' + img[p.id] + '">' + wmHtml + '</div>' +
         '<div class="cap">' + esc(cap) + '</div></div>';
     }).join('');
     return '<section class="page" style="--rows:' + lay.rows + '">' +
@@ -129,8 +168,11 @@
       '.grid{flex:1 1 auto;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(var(--rows),1fr);gap:0.22in;min-height:0}' +
       '.cell{display:flex;flex-direction:column;min-height:0;min-width:0}' +
       '.cell.full{grid-column:1 / -1}' +
-      '.imgbox{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;background:#F4F1E8;border:1px solid #DDD7C8}' +
+      '.imgbox{position:relative;flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;background:#F4F1E8;border:1px solid #DDD7C8}' +
       '.imgbox img{max-width:100%;max-height:100%;object-fit:contain}' +
+      '.wm{position:absolute;left:0;bottom:0;max-width:100%;background:rgba(17,17,17,0.64);color:#fff;font:600 8px "IBM Plex Mono",monospace;letter-spacing:.2px;padding:3px 7px;border-radius:0 6px 0 0;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
+      '.wm div{line-height:1.4;white-space:nowrap}' +
+      '.wm .wm0{font-weight:700;font-size:9px}' +
       '.cap{flex:0 0 auto;font-size:10.5px;line-height:1.3;color:#1A1D22;padding:4px 2px 0;min-height:14px}';
     w.document.open();
     w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>RoadWalk Photo Report</title><style>' + css + '</style></head><body>' + pagesHtml + '</body></html>');
@@ -231,6 +273,7 @@
             '<span class="t">🖨 Photo report</span>' +
             '<label style="font:600 12px system-ui;color:#555">Park&nbsp;<input id="pr-park" placeholder="Park name"></label>' +
             '<label style="font:600 12px system-ui;color:#555;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pr-hearted" checked> hearted only</label>' +
+            '<label style="font:600 12px system-ui;color:#555;display:flex;align-items:center;gap:4px" title="Overlay GPS + date/time on each photo in the PDF"><input type="checkbox" id="pr-wm" checked> watermark</label>' +
             '<span id="pr-count" style="font:600 12px \'IBM Plex Mono\',monospace;color:var(--mute,#9BA0A8)">0 hearted</span>' +
             '<span class="sp"></span>' +
             '<span id="pr-status" style="font:500 11.5px system-ui;color:var(--mute,#9BA0A8)"></span>' +
@@ -250,6 +293,11 @@
       if (code) tryParkName(code).then(function (nm) { if (nm && !$('pr-park').value) $('pr-park').value = nm; else if (nm && $('pr-park').value === code) $('pr-park').value = nm; _parkName = $('pr-park').value; });
     }
     ov.classList.add('on');
+    // Warm the route geometry so STA/MP are ready when Generate is clicked.
+    if (window.RW2PhotoTag && window.RW2PhotoTag.ensureGeo) { try { window.RW2PhotoTag.ensureGeo(); } catch (e) {} }
+    // Auto-fill the Park field from the loaded park each time it opens (if empty).
+    var code = (rip() && rip().state && rip().state.bundle && rip().state.bundle.park) || '';
+    var pf = $('pr-park'); if (pf && !pf.value && code) pf.value = code;
     renderBuilder();
   }
   function closeOverlay() { var ov = $('pr-overlay'); if (ov) ov.classList.remove('on'); }

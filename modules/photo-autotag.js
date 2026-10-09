@@ -140,7 +140,8 @@
     (data.routes || []).forEach(function (r) {
       var paths = decodePaths(r._g).filter(function (p) { return p.length >= 2; });
       if (!paths.length) return;
-      ROUTES.push({ ident: r.ROUTE_IDENT, name: r.RTE_NAME || '', fmss: String(r.FMSS_NO || ''), paths: paths, bb: unionBbox(paths) });
+      ROUTES.push({ ident: r.ROUTE_IDENT, name: r.RTE_NAME || '', fmss: String(r.FMSS_NO || ''), paths: paths, bb: unionBbox(paths),
+                    begMp: (r.BEG_MP_DCV != null ? Number(r.BEG_MP_DCV) : null), endMp: (r.END_MP_DCV != null ? Number(r.END_MP_DCV) : null) });
     });
     (data.lots || []).forEach(function (l) {
       var rings = decodePaths(l._g).filter(function (p) { return p.length >= 3; });
@@ -204,6 +205,44 @@
     return out;
   }
 
+  // ---- station / milepost along a route --------------------------------------
+  // Closest point on segment A-B to P → {d: dist ft, t: 0..1 along the segment}.
+  function closestOnSeg(pLat, pLng, aLat, aLng, bLat, bLng) {
+    var kx = ftPerDegLng((pLat + aLat + bLat) / 3), ky = FT_PER_DEG_LAT;
+    var px = pLng * kx, py = pLat * ky, ax = aLng * kx, ay = aLat * ky, bx = bLng * kx, by = bLat * ky;
+    var vx = bx - ax, vy = by - ay, wx = px - ax, wy = py - ay;
+    var len2 = vx * vx + vy * vy;
+    var t = len2 ? (wx * vx + wy * vy) / len2 : 0; t = t < 0 ? 0 : t > 1 ? 1 : t;
+    var cx = ax + t * vx, cy = ay + t * vy, dx = px - cx, dy = py - cy;
+    return { d: Math.sqrt(dx * dx + dy * dy), t: t };
+  }
+  // Project P onto a route's centerline → {ft: offset, sta: along-route feet, total: route length ft}.
+  function projectStation(lat, lng, route) {
+    var best = Infinity, bestSta = 0, cum = 0;
+    for (var pi = 0; pi < route.paths.length; pi++) {
+      var path = route.paths[pi];
+      for (var i = 0; i + 1 < path.length; i++) {
+        var a = path[i], b = path[i + 1];
+        var segLen = distFt(a[0], a[1], b[0], b[1]);
+        var c = closestOnSeg(lat, lng, a[0], a[1], b[0], b[1]);
+        if (c.d < best) { best = c.d; bestSta = cum + c.t * segLen; }
+        cum += segLen;
+      }
+    }
+    return { ft: best, sta: bestSta, total: cum };
+  }
+  function mpFor(route, sta, total) {
+    if (route.begMp == null || route.endMp == null || !total) return null;
+    return route.begMp + (sta / total) * (route.endMp - route.begMp);
+  }
+  function routeByIdent(id) { for (var i = 0; i < ROUTES.length; i++) if (ROUTES[i].ident === id) return ROUTES[i]; return null; }
+  // Public: station + milepost of a point on a given route ('' if unknown).
+  function station(lat, lng, ident) {
+    var rg = routeByIdent(ident); if (!rg) return null;
+    var pr = projectStation(lat, lng, rg); var mp = mpFor(rg, pr.sta, pr.total);
+    return { sta: Math.round(pr.sta), mp: (mp != null ? Math.round(mp * 100) / 100 : null) };
+  }
+
   // ---- tag the photos --------------------------------------------------------
   function geo() { return (window._RW && window._RW.geophotos) || null; }
 
@@ -235,10 +274,14 @@
           p.rip_route = near[0].ident; p.rip_route_name = near[0].name;
           p.rip_route_fmss = near[0].fmss; p.rip_route_ft = near[0].ft;
           p.rip_route_ambig = near.length > 1;
+          var rg = routeByIdent(near[0].ident);
+          if (rg) { var pr = projectStation(lat, lng, rg); p.rip_route_sta = Math.round(pr.sta); var mp = mpFor(rg, pr.sta, pr.total); p.rip_route_mp = (mp != null ? Math.round(mp * 100) / 100 : null); }
+          else { p.rip_route_sta = null; p.rip_route_mp = null; }
           taggedRt++; if (near.length > 1) ambig++;
           byRoute[near[0].ident] = (byRoute[near[0].ident] || 0) + 1;
         } else {
           p.rip_route = ''; p.rip_route_name = ''; p.rip_route_fmss = ''; p.rip_route_ft = null; p.rip_route_ambig = false;
+          p.rip_route_sta = null; p.rip_route_mp = null;
         }
 
         p.rip_lots = lots;
@@ -334,10 +377,108 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', whenReady);
   else whenReady();
 
+  // ---- post-upload tagging wizard -------------------------------------------
+  function counts() {
+    var g = geo(); var gps = 0, tagged = 0, untagged = 0;
+    if (g) g.list().forEach(function (p) {
+      var lat = Number(p.lat), lng = Number(p.lng);
+      if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) return;
+      gps++; if (p.rip_route) tagged++; else untagged++;
+    });
+    return { gps: gps, tagged: tagged, untagged: untagged };
+  }
+
+  function wstatus(msg) { var el = document.getElementById('patw-status'); if (el) el.textContent = msg || ''; }
+
+  function updateWizCounts(added) {
+    var c = counts();
+    var sub = document.getElementById('patw-sub');
+    if (sub) sub.textContent = (added ? 'Imported ' + added + ' photo' + (added === 1 ? '' : 's') + '. ' : '') +
+      c.gps + ' GPS photos · ' + c.tagged + ' tagged · ' + c.untagged + ' untagged.';
+    var parked = !!(rip() && rip().hasPark && rip().hasPark());
+    var warn = document.getElementById('patw-warn');
+    if (warn) warn.style.display = parked ? 'none' : 'block';
+    ['patw-all', 'patw-un'].forEach(function (id) { var b = document.getElementById(id); if (b) b.disabled = !parked; });
+  }
+
+  function ensureWizard() {
+    if (document.getElementById('patw-ov')) return;
+    var st = document.createElement('style');
+    st.textContent =
+      '#patw-ov{position:fixed;inset:0;z-index:4200;background:rgba(20,22,28,.5);display:none;align-items:center;justify-content:center}' +
+      '#patw-ov.on{display:flex}' +
+      '#patw-card{width:min(440px,92vw);background:var(--paper,#FBFAF6);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.4);overflow:hidden;font-family:system-ui}' +
+      '#patw-card .hd{background:#fff;border-bottom:1px solid var(--rule,#DDD7C8);padding:13px 16px;font-weight:700;color:var(--blue,#0B3D66);font-size:15px}' +
+      '#patw-card .bd{padding:14px 16px}' +
+      '#patw-card .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}' +
+      '#patw-card select{font:600 13px system-ui;padding:6px 8px;border:1px solid var(--rule,#DDD7C8);border-radius:7px;background:#fff}' +
+      '#patw-card button{font:600 13px system-ui;padding:8px 12px;border-radius:8px;border:1px solid var(--rule,#DDD7C8);background:#fff;cursor:pointer}' +
+      '#patw-card button.go{background:var(--orange,#C85A2B);color:#fff;border-color:var(--orange,#C85A2B)}' +
+      '#patw-card button:disabled{opacity:.5;cursor:not-allowed}';
+    document.head.appendChild(st);
+    var ov = document.createElement('div');
+    ov.id = 'patw-ov';
+    ov.innerHTML =
+      '<div id="patw-card">' +
+        '<div class="hd">📍 Tag photos to routes</div>' +
+        '<div class="bd">' +
+          '<div id="patw-sub" style="font:500 12.5px system-ui;color:#5b6673"></div>' +
+          '<div id="patw-warn" style="display:none;margin-top:8px;font:600 12px system-ui;color:#C85A2B">Open an NPS park first (RIP) so there are routes to tag against.</div>' +
+          '<div class="row"><span style="font:600 12px system-ui;color:#5b6673">Distance from road / lot</span>' +
+            '<select id="patw-ft"><option value="10">10 ft</option><option value="20">20 ft</option>' +
+            '<option value="30" selected>30 ft</option><option value="50">50 ft</option><option value="100">100 ft</option></select></div>' +
+          '<div class="row">' +
+            '<button class="go" id="patw-all">Tag all GPS photos</button>' +
+            '<button id="patw-un">Re-tag untagged only</button>' +
+            '<span style="flex:1"></span><button id="patw-done">Done</button></div>' +
+          '<div id="patw-status" style="margin-top:10px;font:500 12px system-ui;color:#0e7c66;min-height:16px"></div>' +
+        '</div></div>';
+    document.body.appendChild(ov);
+    ov.addEventListener('click', function (e) { if (e.target === ov) ov.classList.remove('on'); });
+    document.getElementById('patw-done').addEventListener('click', function () { ov.classList.remove('on'); });
+
+    function run(untaggedOnly) {
+      var ft = +document.getElementById('patw-ft').value || 30;
+      var ids = null;
+      if (untaggedOnly) {
+        var g = geo(); if (!g) return;
+        ids = g.list().filter(function (p) {
+          var lat = Number(p.lat), lng = Number(p.lng);
+          return !p.rip_route && isFinite(lat) && isFinite(lng) && !(lat === 0 && lng === 0);
+        }).map(function (p) { return p.id; });
+        if (!ids.length) { wstatus('No untagged GPS photos remain.'); return; }
+      }
+      document.getElementById('patw-all').disabled = true; document.getElementById('patw-un').disabled = true;
+      wstatus('Tagging within ' + ft + ' ft…');
+      tagPhotos(ft, ids).then(function (r) {
+        updateWizCounts();
+        if (!r.ok) { wstatus(r.reason); return; }
+        wstatus('Tagged ' + r.taggedRt + ' to roads, ' + r.taggedLot + ' to lots' +
+          (r.ambig ? ' · ' + r.ambig + ' near 2+ roads' : '') + '. ' + counts().untagged + ' still untagged' +
+          (counts().untagged ? ' — try a wider distance.' : '.'));
+        if (window.RW2RouteView && window.RW2RouteView.refresh) { try { window.RW2RouteView.refresh(); } catch (e) {} }
+      }, function (e) {
+        updateWizCounts(); wstatus('Failed: ' + (e && e.message ? e.message : e));
+      });
+    }
+    document.getElementById('patw-all').addEventListener('click', function () { run(false); });
+    document.getElementById('patw-un').addEventListener('click', function () { run(true); });
+  }
+
+  function wizard(opts) {
+    opts = opts || {};
+    ensureWizard();
+    wstatus('');
+    updateWizCounts(opts.added);
+    document.getElementById('patw-ov').classList.add('on');
+  }
+
   // ---- public API ------------------------------------------------------------
   window.RW2PhotoTag = {
     tagPhotos: tagPhotos,
+    wizard: wizard,
     ensureGeo: ensureGeo,
+    station: station,
     nearbyRoutes: nearbyRoutes,
     nearbyLots: nearbyLots,
     counts: function () { return { routes: ROUTES.length, lots: LOTS.length, builtFor: _builtFor }; },
