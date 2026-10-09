@@ -99,26 +99,26 @@
     // resolve every image (incl. offloaded) + the AECOM logo up front
     var ids = []; secs.forEach(function (s) { s.photos.forEach(function (p) { ids.push(p.id); }); });
     Promise.all([
-      fetchBlackLogo(),
+      fetchLogoFile('aecom-logo-black.png'),
+      fetchLogoFile('nps-logo.png'),
       Promise.all(ids.map(function (id) { return imageFor(id).then(function (d) { return { id: id, d: d }; }); })),
     ]).then(function (all) {
-        var blackLogo = all[0], res = all[1];
+        var blackLogo = all[0], npsLogo = all[1], res = all[2];
         var img = {}; var missing = 0;
         res.forEach(function (r) { if (r.d) img[r.id] = r.d; else missing++; });
         var park = ($('pr-park') && $('pr-park').value) || _parkName || (rip() && rip().state && rip().state.bundle && rip().state.bundle.park) || '';
         var wmOn = !$('pr-wm') || $('pr-wm').checked;
-        // Prefer the official black AECOM logo (data/aecom-logo-black.png); fall
-        // back to the app's reverse logo, darkened.
-        var logo = blackLogo || (document.querySelector('.aecom-logo') || {}).src || '';
-        var logoBlack = !!blackLogo;
+        // Prefer the official black AECOM logo; fall back to the app reverse logo, darkened.
+        var aecomLogo = blackLogo || (document.querySelector('.aecom-logo') || {}).src || '';
+        var aecomBlack = !!blackLogo;
         var pagesHtml = '';
         secs.forEach(function (s) {
           var usable = s.photos.filter(function (p) { return img[p.id]; });
           var pages = chunk6(usable);
           var routeId = (s.key === UNASSIGNED) ? 'Unassigned' : (s.key.indexOf('lot:') === 0 ? s.key.slice(4) : s.key);
           pages.forEach(function (pagePhotos, pi) {
-            pagesHtml += pageHtml({ park: park, logo: logo, logoBlack: logoBlack, secTitle: s.title, routeId: routeId,
-              pageIdx: pi + 1, pageCount: pages.length, photos: pagePhotos, img: img, wmOn: wmOn });
+            pagesHtml += pageHtml({ park: park, aecomLogo: aecomLogo, aecomBlack: aecomBlack, npsLogo: npsLogo,
+              secTitle: s.title, routeId: routeId, pageIdx: pi + 1, pageCount: pages.length, photos: pagePhotos, img: img, wmOn: wmOn });
           });
         });
         if (!pagesHtml) { status('No printable images (all offloaded with no stored copy?).'); return; }
@@ -133,15 +133,15 @@
   var _CARD16 = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
   function cardinal(deg) { return _CARD16[Math.round((((+deg % 360) + 360) % 360) / 22.5) % 16]; }
 
-  // Load the official black AECOM logo as a data URI (cached once).
-  var _blackLogo;
-  function fetchBlackLogo() {
-    if (_blackLogo !== undefined) return Promise.resolve(_blackLogo);
-    return fetch('aecom-logo-black.png', { cache: 'force-cache' })
+  // Load a logo file from the app root as a data URI (cached once per name).
+  var _logoCache = {};
+  function fetchLogoFile(name) {
+    if (name in _logoCache) return Promise.resolve(_logoCache[name]);
+    return fetch(name, { cache: 'force-cache' })
       .then(function (r) { if (!r.ok) throw 0; return r.blob(); })
       .then(function (b) { return new Promise(function (res) { var fr = new FileReader(); fr.onload = function () { res(fr.result); }; fr.onerror = function () { res(null); }; fr.readAsDataURL(b); }); })
-      .then(function (d) { _blackLogo = d || null; return _blackLogo; })
-      .catch(function () { _blackLogo = null; return null; });
+      .then(function (d) { _logoCache[name] = d || null; return _logoCache[name]; })
+      .catch(function () { _logoCache[name] = null; return null; });
   }
 
   // Watermark content as ordered lines (top row = route + FMSS, then STA/MP,
@@ -192,14 +192,16 @@
         '<div class="imgbox"><img src="' + o.img[p.id] + '">' + wmHtml + '</div>' +
         (cap ? '<div class="cap">' + esc(cap) + '</div>' : '') + '</div>';
     }).join('');
-    var logoHtml = o.logo ? '<img class="hdr-logo' + (o.logoBlack ? ' blk' : '') + '" src="' + o.logo + '" alt="AECOM">' : '<span class="hdr-aecom">AECOM</span>';
+    var npsHtml = o.npsLogo ? '<img class="nps-logo" src="' + o.npsLogo + '" alt="NPS">' : '';
+    var aecomHtml = o.aecomLogo ? '<img class="ftr-logo' + (o.aecomBlack ? ' blk' : '') + '" src="' + o.aecomLogo + '" alt="AECOM">' : '<span class="ftr-aecom">AECOM</span>';
     return '<section class="page" style="--rows:' + lay.rows + '">' +
-      '<div class="phdr">' + logoHtml +
+      '<div class="phdr">' + npsHtml +
       '<span class="pk">' + esc(o.park) + '</span>' +
       '<span class="sc">' + esc(o.secTitle) + '</span></div>' +
       '<div class="grid">' + cells + '</div>' +
-      '<div class="pftr"><span>' + esc(o.routeId) + '</span><span>Page ' + o.pageIdx + ' of ' + o.pageCount + '</span></div>' +
-      '</section>';
+      '<div class="pftr">' + aecomHtml +
+      '<div class="pftr-r"><span class="rid">' + esc(o.routeId) + '</span><span class="pg">Page ' + o.pageIdx + ' of ' + o.pageCount + '</span></div>' +
+      '</div></section>';
   }
 
   function openPrint(pagesHtml) {
@@ -213,12 +215,10 @@
       // printed page; small height buffer keeps a section to exactly one sheet.
       '.page{height:9.9in;display:flex;flex-direction:column;overflow:hidden;page-break-after:always;break-after:page;break-inside:avoid;page-break-inside:avoid}' +
       '.page:last-child{page-break-after:auto;break-after:auto}' +
-      // header: AECOM logo (top-left) + park + section, clean rule
-      '.phdr{display:flex;align-items:center;gap:12px;border-bottom:2px solid #0B3D66;padding-bottom:6px;margin-bottom:9px;flex:0 0 auto}' +
-      '.phdr .hdr-logo{height:24px;width:auto;object-fit:contain}' +
-      '.phdr .hdr-logo:not(.blk){filter:brightness(0)}' +
-      '.phdr .hdr-aecom{font:800 14px "IBM Plex Sans",system-ui;color:#12233b;letter-spacing:1px}' +
-      '.phdr .pk{font-weight:800;font-size:15px;color:#12233b;letter-spacing:.2px}' +
+      // header: NPS logo + full park name (navy) at top-left, section at right
+      '.phdr{display:flex;align-items:center;gap:10px;border-bottom:2px solid #16315E;padding-bottom:6px;margin-bottom:9px;flex:0 0 auto}' +
+      '.phdr .nps-logo{height:30px;width:auto;object-fit:contain;flex:0 0 auto}' +
+      '.phdr .pk{font-weight:800;font-size:17px;color:#16315E;letter-spacing:.2px}' +
       '.phdr .sc{font-weight:600;font-size:12px;color:#5b6673;flex:1 1 auto;text-align:right}' +
       '.grid{flex:1 1 auto;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(var(--rows),1fr);gap:0.16in;min-height:0}' +
       '.cell{display:flex;flex-direction:column;min-height:0;min-width:0}' +
@@ -232,8 +232,13 @@
       '.wm div{line-height:1.45;white-space:pre}' +
       '.wm .wm0{font-weight:800;font-size:9.5px;letter-spacing:.4px}' +
       '.cap{flex:0 0 auto;font-size:10px;line-height:1.3;color:#1A1D22;padding:3px 2px 0;min-height:12px}' +
-      // per-route footer: Route ID (left) + Page N of X (right)
-      '.pftr{flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;border-top:1pt solid #c7ccd2;margin-top:8px;padding-top:5px;font:600 9px "IBM Plex Mono",monospace;color:#5b6673;letter-spacing:.3px}';
+      // footer: AECOM logo (bottom-left) + Route ID over Page N of X (bottom-right)
+      '.pftr{flex:0 0 auto;display:flex;justify-content:space-between;align-items:flex-end;border-top:1pt solid #c7ccd2;margin-top:8px;padding-top:6px}' +
+      '.pftr .ftr-logo{height:16px;width:auto;object-fit:contain}' +
+      '.pftr .ftr-logo:not(.blk){filter:brightness(0)}' +
+      '.pftr .ftr-aecom{font:800 12px "IBM Plex Sans",system-ui;color:#16315E;letter-spacing:1px}' +
+      '.pftr-r{display:flex;flex-direction:column;align-items:flex-end;gap:1px;font:600 9px "IBM Plex Mono",monospace;color:#5b6673;letter-spacing:.3px}' +
+      '.pftr-r .rid{font-weight:800;color:#16315E;font-size:10px}';
     w.document.open();
     w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>RoadWalk Photo Report</title><style>' + css + '</style></head><body>' + pagesHtml + '</body></html>');
     w.document.close();
