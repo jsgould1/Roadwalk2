@@ -127,6 +127,21 @@
     return names.reduce(function (pr, n) { return pr.then(function (acc) { return restoreSet(n).then(function (r) { return { restored: acc.restored + r.restored, missing: acc.missing + r.missing }; }); }); }, Promise.resolve({ restored: 0, missing: 0 }));
   }
 
+  // Permanently remove a set: delete its photos (RAM + IDB) and offloaded blobs.
+  function deleteSet(name, onProgress) {
+    var g = geo(); if (!g) return Promise.resolve(0);
+    var ps = photosInSet(name);
+    var ids = ps.map(function (p) { return p.id; });
+    var done = 0, total = ids.length;
+    return ids.reduce(function (pr, id) {
+      return pr.then(function () {
+        return blobDel(id).then(function () {
+          return g.remove(id).then(function () { done++; if (onProgress && (done % 50 === 0 || done === total)) onProgress(done, total); });
+        });
+      });
+    }, Promise.resolve()).then(function () { try { g.refresh(); } catch (e) {} return total; });
+  }
+
   // ---- folder grouping -------------------------------------------------------
   // Whole pick → one set (folder name). Subfolders included.
   function oneSetName(files) {
@@ -166,7 +181,9 @@
         '<div style="flex:1 1 auto;min-width:0">' +
           '<div style="font:600 12.5px system-ui;color:var(--ink,#1A1D22);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(s.name) + '</div>' +
           '<div style="font:500 10.5px \'IBM Plex Mono\',monospace;color:var(--mute,#9BA0A8)">' + sub + '</div>' +
-        '</div></div>';
+        '</div>' +
+        '<button class="ps-del" title="Delete this set permanently" style="flex:0 0 auto;border:0;background:transparent;cursor:pointer;color:#b23a1f;font-size:14px;padding:2px 4px">🗑</button>' +
+        '</div>';
     }).join('');
     Array.prototype.forEach.call(host.querySelectorAll('.ps-row'), function (row) {
       var name = decodeURIComponent(row.getAttribute('data-set'));
@@ -181,6 +198,24 @@
           else status(cb.checked ? 'Loaded "' + name + '".' : 'Offloaded "' + name + '" (RAM freed).');
           renderSets();
         }, function (e) { cb.disabled = false; status('Failed: ' + (e && e.message ? e.message : e)); });
+      });
+      // Delete → inline two-step confirm (no native dialog; permanent).
+      var del = row.querySelector('.ps-del');
+      del.addEventListener('click', function () {
+        var info = sets().filter(function (x) { return x.name === name; })[0];
+        var n = info ? info.total : 0;
+        row.innerHTML = '<div style="flex:1;font:600 11.5px system-ui;color:#b23a1f">Delete "' + esc(name) + '" — ' + n + ' photo' + (n === 1 ? '' : 's') + ' permanently?</div>' +
+          '<button class="ps-del-yes" style="border:0;background:#b23a1f;color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font:700 11.5px system-ui">Delete</button>' +
+          '<button class="ps-del-no" style="border:1px solid var(--rule,#DDD7C8);background:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;font:600 11.5px system-ui">Keep</button>';
+        row.querySelector('.ps-del-no').addEventListener('click', renderSets);
+        row.querySelector('.ps-del-yes').addEventListener('click', function () {
+          status('Deleting "' + name + '"…');
+          deleteSet(name, function (d, t) { status('Deleting "' + name + '"… ' + d + '/' + t); }).then(function (count) {
+            status('Deleted ' + count + ' photo(s) from "' + name + '".');
+            renderSets();
+            if (window.RW2RouteView && window.RW2RouteView.refresh) { try { window.RW2RouteView.refresh(); } catch (e) {} }
+          });
+        });
       });
     });
   }
@@ -283,7 +318,7 @@
   // ---- public API ------------------------------------------------------------
   window.RW2PhotoSets = {
     sets: sets, offloadSet: offloadSet, restoreSet: restoreSet,
-    offloadAll: offloadAll, loadAll: loadAll, renderSets: renderSets,
+    offloadAll: offloadAll, loadAll: loadAll, deleteSet: deleteSet, renderSets: renderSets,
     imageFor: imageFor,
   };
 })();

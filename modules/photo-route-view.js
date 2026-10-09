@@ -62,11 +62,11 @@
     var nameOf = {};
     (g ? g.list() : []).forEach(function (p) { if (p.rip_route && !nameOf[p.rip_route]) nameOf[p.rip_route] = p.rip_route_name || ''; });
     var total = idents.reduce(function (a, k) { return a + counts[k]; }, 0);
-    var html = '<option value="' + ALL + '">All routes (' + total + ')</option>';
+    var html = '<option value="' + ALL + '">All ' + idents.length + ' route' + (idents.length === 1 ? '' : 's') + ' · ' + total + ' photo' + (total === 1 ? '' : 's') + '</option>';
     idents.forEach(function (k) {
-      html += '<option value="' + esc(k) + '">' + esc(k) + (nameOf[k] ? ' · ' + esc(nameOf[k]) : '') + ' (' + counts[k] + ')</option>';
+      html += '<option value="' + esc(k) + '">' + esc(k) + (nameOf[k] ? ' · ' + esc(nameOf[k]) : '') + ' (' + counts[k] + ' photo' + (counts[k] === 1 ? '' : 's') + ')</option>';
     });
-    if (untagged) html += '<option value="' + UNTAGGED + '">— untagged (' + untagged + ') —</option>';
+    if (untagged) html += '<option value="' + UNTAGGED + '">— untagged (' + untagged + ' photos) —</option>';
     var keep = sel.value;
     sel.innerHTML = html;
     sel.value = [ALL, UNTAGGED].indexOf(keep) !== -1 || counts[keep] ? keep : ALL;
