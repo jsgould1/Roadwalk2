@@ -104,11 +104,15 @@
         res.forEach(function (r) { if (r.d) img[r.id] = r.d; else missing++; });
         var park = ($('pr-park') && $('pr-park').value) || _parkName || (rip() && rip().state && rip().state.bundle && rip().state.bundle.park) || '';
         var wmOn = !$('pr-wm') || $('pr-wm').checked;
+        var logo = (document.querySelector('.aecom-logo') || {}).src || '';
         var pagesHtml = '';
         secs.forEach(function (s) {
           var usable = s.photos.filter(function (p) { return img[p.id]; });
-          chunk6(usable).forEach(function (pagePhotos) {
-            pagesHtml += pageHtml(park, s.title, pagePhotos, img, wmOn);
+          var pages = chunk6(usable);
+          var routeId = (s.key === UNASSIGNED) ? 'Unassigned' : (s.key.indexOf('lot:') === 0 ? s.key.slice(4) : s.key);
+          pages.forEach(function (pagePhotos, pi) {
+            pagesHtml += pageHtml({ park: park, logo: logo, secTitle: s.title, routeId: routeId,
+              pageIdx: pi + 1, pageCount: pages.length, photos: pagePhotos, img: img, wmOn: wmOn });
           });
         });
         if (!pagesHtml) { status('No printable images (all offloaded with no stored copy?).'); return; }
@@ -126,10 +130,10 @@
   // Watermark content as ordered lines (top row = route + FMSS, then STA/MP,
   // then GPS + bearing, then capture date/time).
   // Layout (space-separated columns, no dot separators):
-  //   ROUTE-ID   ROUTE NAME                 (bold)
+  //   ROUTE-ID   ROUTE NAME                             (bold)
   //   FMSS 12345
-  //   STA 12+34   MP 0.23   37.531053, -85.733772
-  //   110° (ESE)   9/28/2026, 3:53:13 PM
+  //   STA 12+34   MP 0.23   37.531053, -85.733772   110° (ESE)
+  //   AECOM   9/28/2026, 3:53:13 PM
   function watermarkLines(p) {
     var lines = [];
     var gps = (isFinite(Number(p.lat)) && isFinite(Number(p.lng))) ? (Number(p.lat).toFixed(6) + ', ' + Number(p.lng).toFixed(6)) : '';
@@ -144,37 +148,41 @@
       if (p.rip_route_sta != null) l3.push('STA ' + fmtSta(p.rip_route_sta));
       if (p.rip_route_mp != null) l3.push('MP ' + Number(p.rip_route_mp).toFixed(2));
       if (gps) l3.push(gps);
+      if (brg) l3.push(brg);
       if (l3.length) lines.push(l3.join('   '));
-    } else if (p.rip_lot) {
-      lines.push(p.rip_lot + (p.rip_lot_name ? '   ' + p.rip_lot_name : ''));
-      lines.push(p.rip_lot_fmss ? ('FMSS ' + p.rip_lot_fmss + '   parking lot') : 'parking lot');
-      if (gps) lines.push(gps);
-    } else if (gps) {
-      lines.push(gps);
+    } else {
+      var head = p.rip_lot ? (p.rip_lot + (p.rip_lot_name ? '   ' + p.rip_lot_name : '')) : '';
+      if (head) { lines.push(head); lines.push(p.rip_lot_fmss ? ('FMSS ' + p.rip_lot_fmss + '   parking lot') : 'parking lot'); }
+      var lg = [];
+      if (gps) lg.push(gps); if (brg) lg.push(brg);
+      if (lg.length) lines.push(lg.join('   '));
     }
-    var l4 = [brg, 'AECOM', dt].filter(Boolean).join('   ');
+    var l4 = ['AECOM', dt].filter(Boolean).join('   ');
     if (l4) lines.push(l4);
     return lines;
   }
 
-  function pageHtml(park, secTitle, photos, img, wmOn) {
-    var lay = layoutFor(photos.length);
-    var cells = photos.map(function (p, i) {
+  function pageHtml(o) {
+    var lay = layoutFor(o.photos.length);
+    var cells = o.photos.map(function (p, i) {
       var full = lay.fulls[i] ? ' full' : '';
       var cap = (p.description || '').trim();
-      var wmLines = wmOn ? watermarkLines(p) : [];
+      var wmLines = o.wmOn ? watermarkLines(p) : [];
       var wmHtml = wmLines.length ? '<div class="wm">' + wmLines.map(function (l, li) {
         return '<div' + (li === 0 ? ' class="wm0"' : '') + '>' + esc(l) + '</div>';
       }).join('') + '</div>' : '';
       return '<div class="cell' + full + '">' +
-        '<div class="imgbox"><img src="' + img[p.id] + '">' + wmHtml + '</div>' +
-        '<div class="cap">' + esc(cap) + '</div></div>';
+        '<div class="imgbox"><img src="' + o.img[p.id] + '">' + wmHtml + '</div>' +
+        (cap ? '<div class="cap">' + esc(cap) + '</div>' : '') + '</div>';
     }).join('');
+    var logoHtml = o.logo ? '<img class="hdr-logo" src="' + o.logo + '" alt="AECOM">' : '<span class="hdr-aecom">AECOM</span>';
     return '<section class="page" style="--rows:' + lay.rows + '">' +
-      '<div class="phdr"><span class="pk">' + esc(park) + '</span>' +
-      '<span class="sc">' + esc(secTitle) + '</span>' +
-      '<span class="brand">AECOM</span></div>' +
-      '<div class="grid">' + cells + '</div></section>';
+      '<div class="phdr">' + logoHtml +
+      '<span class="pk">' + esc(o.park) + '</span>' +
+      '<span class="sc">' + esc(o.secTitle) + '</span></div>' +
+      '<div class="grid">' + cells + '</div>' +
+      '<div class="pftr"><span>' + esc(o.routeId) + '</span><span>Page ' + o.pageIdx + ' of ' + o.pageCount + '</span></div>' +
+      '</section>';
   }
 
   function openPrint(pagesHtml) {
@@ -184,23 +192,28 @@
       '@page{size:letter portrait;margin:0.45in}' +
       '*{box-sizing:border-box}' +
       'html,body{margin:0;padding:0;font-family:"IBM Plex Sans",system-ui,sans-serif;color:#1A1D22}' +
-      '.page{height:10.1in;display:flex;flex-direction:column;page-break-after:always;overflow:hidden}' +
+      '.page{height:10.1in;display:flex;flex-direction:column;page-break-after:always}' +
       '.page:last-child{page-break-after:auto}' +
-      '.phdr{display:flex;align-items:center;gap:12px;border-bottom:3px solid #0B3D66;padding-bottom:7px;margin-bottom:11px;flex:0 0 auto}' +
-      '.phdr .pk{font-weight:800;font-size:16px;color:#0B3D66;letter-spacing:.2px}' +
-      '.phdr .sc{font-weight:600;font-size:12.5px;color:#5b6673;flex:1 1 auto}' +
-      '.phdr .brand{font:800 13px "IBM Plex Sans",system-ui;color:#0B3D66;letter-spacing:2px}' +
+      // header: AECOM logo (top-left) + park + section, clean rule
+      '.phdr{display:flex;align-items:center;gap:12px;border-bottom:2px solid #0B3D66;padding-bottom:6px;margin-bottom:9px;flex:0 0 auto}' +
+      '.phdr .hdr-logo{height:20px;width:auto;object-fit:contain;filter:brightness(0)}' +
+      '.phdr .hdr-aecom{font:800 14px "IBM Plex Sans",system-ui;color:#12233b;letter-spacing:1px}' +
+      '.phdr .pk{font-weight:800;font-size:15px;color:#12233b;letter-spacing:.2px}' +
+      '.phdr .sc{font-weight:600;font-size:12px;color:#5b6673;flex:1 1 auto;text-align:right}' +
       '.grid{flex:1 1 auto;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(var(--rows),1fr);gap:0.16in;min-height:0}' +
       '.cell{display:flex;flex-direction:column;min-height:0;min-width:0}' +
       '.cell.full{grid-column:1 / -1}' +
-      // edge-to-edge photo, rounded, no border — the "grid lines" are gone
-      '.imgbox{position:relative;flex:1 1 auto;min-height:0;overflow:hidden;border-radius:7px;background:#15171c;box-shadow:0 1px 3px rgba(0,0,0,.18);-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
-      '.imgbox img{width:100%;height:100%;object-fit:contain;display:block}' +
-      // full-width gradient caption bar across the bottom (not a corner box)
-      '.wm{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(to top,rgba(10,12,16,.88),rgba(10,12,16,.5) 58%,transparent);color:#fff;font:600 8px "IBM Plex Mono",monospace;letter-spacing:.2px;padding:22px 10px 8px;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
-      '.wm div{line-height:1.42;white-space:pre}' +
+      // engineering look: white, thin border, photo fills the frame so the
+      // watermark sits across the bottom of the actual image
+      '.imgbox{position:relative;flex:1 1 auto;min-height:0;overflow:hidden;border:0.75pt solid #9aa3ad;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
+      '.imgbox img{width:100%;height:100%;object-fit:cover;display:block}' +
+      // solid info bar across the bottom of the image
+      '.wm{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,0.68);color:#fff;font:600 8px "IBM Plex Mono",monospace;letter-spacing:.2px;padding:4px 8px 5px;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
+      '.wm div{line-height:1.45;white-space:pre}' +
       '.wm .wm0{font-weight:800;font-size:9.5px;letter-spacing:.4px}' +
-      '.cap{flex:0 0 auto;font-size:10px;line-height:1.3;color:#333;padding:4px 3px 0;min-height:12px}';
+      '.cap{flex:0 0 auto;font-size:10px;line-height:1.3;color:#1A1D22;padding:3px 2px 0;min-height:12px}' +
+      // per-route footer: Route ID (left) + Page N of X (right)
+      '.pftr{flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;border-top:1pt solid #c7ccd2;margin-top:8px;padding-top:5px;font:600 9px "IBM Plex Mono",monospace;color:#5b6673;letter-spacing:.3px}';
     w.document.open();
     w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>RoadWalk Photo Report</title><style>' + css + '</style></head><body>' + pagesHtml + '</body></html>');
     w.document.close();
