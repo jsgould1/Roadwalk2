@@ -26,6 +26,7 @@
       + '<div style="font:800 24px system-ui;color:#12233b">Field Photos</div>'
       + '<div style="font-size:13px;color:#5b6673;margin-top:2px">Import, manage RAM, auto-tag, then browse or print.</div>'
       + '<div id="pd-stats" style="display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 2px"></div>'
+      + '<div id="pd-status" style="font:600 12px system-ui;color:#0e7c66;min-height:16px;margin-top:4px"></div>'
       + card('Import',
           '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">'
           + btn('pd-up-folder', '📁 Upload folder') + btn('pd-up-all', '🗂 Upload all (split by sub-folder)') + btn('pd-up-files', '⬆ Upload files')
@@ -33,7 +34,8 @@
           + '<label style="font:600 12px system-ui;color:#5b6673">Display size <select id="pd-size" style="border:1px solid #d3dae1;border-radius:7px;padding:4px 7px;font:12.5px system-ui;background:#fff">'
           + '<option value="800">800 px</option><option value="1200">1200 px</option><option value="1600">1600 px</option><option value="2400">2400 px</option></select></label>'
           + '<div style="font:500 11px system-ui;color:#9BA0A8;flex:1 1 100%;margin-top:2px">Full-size originals are always kept for save / copy / print — this only sizes the fast in-RAM display copy.</div>'
-          + '</div>')
+          + '</div>'
+          + '<div id="pd-drop" class="rw-dropzone" style="margin-top:10px"><span class="rw-dropzone-ico">⬇</span><span class="rw-dropzone-lbl">…or drag photos / folders here</span></div>')
       + card('', '<div style="font:700 13px system-ui;color:#0B3D66;margin-bottom:6px;letter-spacing:.3px">Photo sets · RAM</div><div id="pd-sets-host"></div>')
       + card('Tag &amp; report',
           '<div style="display:flex;flex-wrap:wrap;gap:8px">'
@@ -62,14 +64,64 @@
   function oneSetName(files) { var rel = files[0] && (files[0].webkitRelativePath || files[0].name) || 'photos', parts = rel.split('/'); return parts.length >= 2 ? parts[0] : 'photos'; }
   function importGroups(groups) {
     var g = geo(); if (!g) return;
-    var names = Object.keys(groups), added = 0;
+    var names = Object.keys(groups), added = 0, relinked = 0;
     names.reduce(function (pr, name) {
-      return pr.then(function () { return g.importFiles(groups[name], name === '(unsorted)' ? null : name).then(function (n) { added += (n || 0); }); });
+      return pr.then(function () {
+        return g.importFiles(groups[name], name === '(unsorted)' ? null : name).then(function (r) {
+          added += (r && r.added) || 0; relinked += (r && r.relinked) || 0;
+        });
+      });
     }, Promise.resolve()).then(function () {
       stats();
       if (window.RW2PhotoSets && window.RW2PhotoSets.renderSets) { try { window.RW2PhotoSets.renderSets(); } catch (e) {} }
+      dstatus((added ? 'Imported ' + added + ' new photo(s). ' : '') + (relinked ? 'Re-linked ' + relinked + ' full-size original(s) to existing photos.' : ''));
+      // Only offer tagging for genuinely new photos (re-linked ones are already tagged).
       if (added && window.RW2PhotoTag && window.RW2PhotoTag.wizard) { try { window.RW2PhotoTag.wizard({ added: added }); } catch (e) {} }
     });
+  }
+  function dstatus(msg) { var el = $('pd-status'); if (el) el.textContent = msg || ''; }
+
+  // ---- drag & drop (files or folders, recursed) ------------------------------
+  function readAllEntries(reader) {
+    return new Promise(function (resolve) {
+      var all = [];
+      (function read() {
+        reader.readEntries(function (batch) {
+          if (!batch.length) { resolve(all); return; }
+          all = all.concat(Array.prototype.slice.call(batch)); read();
+        }, function () { resolve(all); });
+      })();
+    });
+  }
+  function walkEntry(entry, prefix) {
+    return new Promise(function (resolve) {
+      if (!entry) { resolve([]); return; }
+      if (entry.isFile) { entry.file(function (f) { resolve([{ file: f, path: prefix + entry.name }]); }, function () { resolve([]); }); }
+      else if (entry.isDirectory) {
+        readAllEntries(entry.createReader()).then(function (ents) {
+          Promise.all(ents.map(function (e) { return walkEntry(e, prefix + entry.name + '/'); }))
+            .then(function (arrs) { resolve([].concat.apply([], arrs)); });
+        });
+      } else resolve([]);
+    });
+  }
+  function filesFromDrop(dt) {
+    var items = dt && dt.items ? Array.prototype.slice.call(dt.items) : [];
+    var entries = items.map(function (it) { return (it.kind === 'file' && it.webkitGetAsEntry) ? it.webkitGetAsEntry() : null; }).filter(Boolean);
+    if (entries.length) {
+      return Promise.all(entries.map(function (e) { return walkEntry(e, ''); })).then(function (arrs) { return [].concat.apply([], arrs); });
+    }
+    return Promise.resolve(Array.prototype.slice.call((dt && dt.files) || []).map(function (f) { return { file: f, path: f.name }; }));
+  }
+  function groupDropped(items) {
+    var g = {};
+    items.forEach(function (it) {
+      if (!/^image\//.test(it.file.type || '') && !/\.(jpe?g|png|gif|webp|heic)$/i.test(it.file.name || '')) return;
+      var parts = it.path.split('/');
+      var key = parts.length >= 2 ? parts[0] : '(unsorted)';
+      (g[key] = g[key] || []).push(it.file);
+    });
+    return g;
   }
 
   function wire() {
@@ -84,6 +136,20 @@
     var sz = $('pd-size');
     try { var sv = localStorage.getItem('rw_photo_maxsize'); sz.value = sv || '1600'; } catch (e) { sz.value = '1600'; }
     sz.onchange = function () { try { localStorage.setItem('rw_photo_maxsize', sz.value); } catch (e) {} var pp = $('pp-size'); if (pp) pp.value = sz.value; };
+
+    var dz = $('pd-drop');
+    if (dz) {
+      ['dragenter', 'dragover'].forEach(function (ev) { dz.addEventListener(ev, function (e) { e.preventDefault(); e.stopPropagation(); dz.classList.add('rw-drop-active'); }); });
+      ['dragleave', 'dragend'].forEach(function (ev) { dz.addEventListener(ev, function (e) { e.preventDefault(); e.stopPropagation(); dz.classList.remove('rw-drop-active'); }); });
+      dz.addEventListener('drop', function (e) {
+        e.preventDefault(); e.stopPropagation(); dz.classList.remove('rw-drop-active');
+        dstatus('Reading dropped items…');
+        filesFromDrop(e.dataTransfer).then(function (items) {
+          var groups = groupDropped(items);
+          if (Object.keys(groups).length) importGroups(groups); else dstatus('No images found in the drop.');
+        });
+      });
+    }
 
     $('pd-autotag').onclick = function () { if (window.RW2PhotoTag && window.RW2PhotoTag.wizard) window.RW2PhotoTag.wizard({}); };
     $('pd-browse').onclick = function () { if (window.showModule) window.showModule('rip'); if (window.RW2RIP) { window.RW2RIP.state.tab = 'photos'; try { window.RW2RIP.render(); } catch (e) {} } };

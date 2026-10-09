@@ -121,7 +121,7 @@
 <script src="modules/photo-autotag.js?v=3" defer></script>
 <script src="modules/photo-route-view.js?v=4" defer></script>
 <script src="modules/photo-report.js?v=9" defer></script>
-<script src="modules/photo-dashboard.js?v=1" defer></script>
+<script src="modules/photo-dashboard.js?v=3" defer></script>
 
 <style>
 /* ============================================================
@@ -38019,9 +38019,24 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       ? (PHOTOS.length + ' photo' + (PHOTOS.length > 1 ? 's' : '') + ' stored')
       : 'No photos yet.';
   }
+  // Re-link target: an existing record to attach a re-imported original to
+  // (match by filename; prefer the same set; else a unique filename match).
+  // Ambiguous matches are skipped so we never attach to the wrong photo.
+  function _relinkTarget(pre, used, name, set) {
+    if (!name) return null;
+    var exact = null, nameMatches = [];
+    for (var i = 0; i < pre.length; i++) {
+      var p = pre[i];
+      if (used[p.id] || p._name !== name) continue;
+      nameMatches.push(p);
+      if (set != null && p._set === set && !exact) exact = p;
+    }
+    if (exact) return exact;
+    return nameMatches.length === 1 ? nameMatches[0] : null;
+  }
   function handleFiles(files, setName) {
     var arr = Array.prototype.slice.call(files || []);
-    if (!arr.length) return Promise.resolve(0);
+    if (!arr.length) return Promise.resolve({ added: 0, relinked: 0 });
     var map = rwMap();
     var center = (map && map.getCenter) ? map.getCenter() : { lat: 0, lng: 0 };
     var countEl = $('pp-count');
@@ -38031,7 +38046,9 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     // Size comes from the shared setting (map panel + Photos dashboard both write it).
     var maxSize = 1600;
     try { var _sv = parseInt(localStorage.getItem('rw_photo_maxsize'), 10); if (_sv) maxSize = _sv; } catch (e) {}
-    var added = 0, noGpsIdx = 0, total = arr.length, done = 0;
+    var added = 0, relinked = 0, noGpsIdx = 0, total = arr.length, done = 0;
+    var preExisting = PHOTOS.slice();      // records that existed before this import
+    var usedRelink = Object.create(null);  // ids already re-linked in this batch
     if (countEl) countEl.textContent = 'Importing 0 / ' + total + '…';
     var seq = Promise.resolve();
     arr.forEach(function (file) {
@@ -38055,6 +38072,18 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
               lat = center.lat + (noGpsIdx % 2 ? jit : -jit);
               lng = center.lng + jit;
               noGpsIdx++;
+            }
+            // Re-link: if a record with the same filename (+ set) already exists
+            // — e.g. a project opened with metadata but no local original — attach
+            // this file as its original and refresh its display copy, KEEPING all
+            // its metadata (hearts, tags, captions, corrected lat/lng). No duplicate.
+            var tgt = _relinkTarget(preExisting, usedRelink, file && file.name, setName);
+            if (tgt) {
+              usedRelink[tgt.id] = true;
+              tgt.dataUrl = dataUrl;      // refresh the display copy from the source
+              tgt._hasOrig = true;
+              relinked++;
+              return dbPut(tgt).then(function () { return origPut(tgt.id, file, file.name, file.type); });
             }
             var rec = {
               id: 'gp' + Date.now() + Math.random().toString(36).slice(2, 6),
@@ -38080,7 +38109,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     });
     return seq.then(function () {
       updateCount();
-      if (added) {
+      if (added || relinked) {
         if (!photosVisible) {
           photosVisible = true;
           var c = $('pp-show'); if (c) c.checked = true;
@@ -38088,7 +38117,8 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         }
         render();
       }
-      return added;
+      if (countEl && relinked) countEl.textContent = PHOTOS.length + ' stored · re-linked ' + relinked + ' original' + (relinked === 1 ? '' : 's');
+      return { added: added, relinked: relinked };
     });
   }
   function persistVis() {
@@ -38149,8 +38179,10 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       fileInp.addEventListener('change', function () {
         var res = handleFiles(fileInp.files);
         fileInp.value = '';
-        // After import, walk the user into auto-tagging what they just added.
-        if (res && res.then) res.then(function (n) {
+        // After import, walk the user into auto-tagging what they just added
+        // (skip the wizard when we only re-linked originals — already tagged).
+        if (res && res.then) res.then(function (r) {
+          var n = (r && r.added) || 0;
           if (n && window.RW2PhotoTag && window.RW2PhotoTag.wizard) {
             try { window.RW2PhotoTag.wizard({ added: n }); } catch (e) {}
           }
