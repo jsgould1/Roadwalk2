@@ -117,10 +117,11 @@
 <script src="modules/snapshots.js" defer></script>
 <script src="modules/map-tools.js?v=4" defer></script>
 <script src="modules/flip-sta.js" defer></script>
-<script src="modules/photo-sets.js?v=3" defer></script>
+<script src="modules/photo-sets.js?v=5" defer></script>
 <script src="modules/photo-autotag.js?v=3" defer></script>
 <script src="modules/photo-route-view.js?v=4" defer></script>
 <script src="modules/photo-report.js?v=8" defer></script>
+<script src="modules/photo-dashboard.js?v=1" defer></script>
 
 <style>
 /* ============================================================
@@ -9534,6 +9535,16 @@ body.mobile-mode #app {
             </svg>
           </button>
 
+          <!-- Field photos — geolocated photo markers (sits right under Layers) -->
+          <button class="map-ctl-btn" id="photos-toggle-btn" title="Field photos — tap to toggle, hold/long-press the chevron to filter by type">
+            <span style="font-size:15px;line-height:1;">📷</span>
+          </button>
+          <!-- Photo type-filter chevron — opens the filter panel -->
+          <button class="map-ctl-btn map-ctl-sub" id="photo-filter-btn"
+                  title="Filter photos by type (Sign, Pavement, etc.)">
+            <span style="font-size:12px;line-height:1;font-weight:800">▾</span>
+          </button>
+
           <!-- Distance Measures — opens the measurement tally panel -->
           <button class="map-ctl-btn" id="dm-toggle-btn" title="Distance measures">
             <span style="font-size:15px;line-height:1;">📏</span>
@@ -9547,16 +9558,6 @@ body.mobile-mode #app {
           <!-- USGS Hydro overlay — draws water features on top of any basemap -->
           <button class="map-ctl-btn" id="hydro-toggle-btn" title="USGS Hydro overlay (on any basemap)">
             <span style="font-size:15px;line-height:1;">💧</span>
-          </button>
-
-          <!-- Field photos — geolocated photo markers -->
-          <button class="map-ctl-btn" id="photos-toggle-btn" title="Field photos — tap to toggle, hold/long-press the chevron to filter by type">
-            <span style="font-size:15px;line-height:1;">📷</span>
-          </button>
-          <!-- Photo type-filter chevron — opens the filter panel -->
-          <button class="map-ctl-btn map-ctl-sub" id="photo-filter-btn"
-                  title="Filter photos by type (Sign, Pavement, etc.)">
-            <span style="font-size:12px;line-height:1;font-weight:800">▾</span>
           </button>
 
           <!-- Roadway-width labels — show / hide on the map + SLD -->
@@ -29519,7 +29520,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
 
   function showModule(name) {
     // Guard: ignore unknown module names
-    const VALID = ['file', 'map', 'dashboard', 'data', 'safety', 'log', 'settings', 'project', 'triage', 'tracks', 'rip'];
+    const VALID = ['file', 'map', 'dashboard', 'data', 'safety', 'log', 'settings', 'project', 'triage', 'tracks', 'rip', 'photos'];
     if (!VALID.includes(name)) {
       console.warn('[RoadWalk] showModule: unknown module "' + name + '"');
       return;
@@ -29593,6 +29594,11 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     // ── Photo Triage module: rebuild the filmstrip + mini-map on tab switch ──
     if (name === 'triage' && typeof window.renderTriage === 'function') {
       window.renderTriage();
+    }
+
+    // ── Photos dashboard: refresh stats + sets on tab switch ──
+    if (name === 'photos' && window.RW2PhotoDash && typeof window.RW2PhotoDash.render === 'function') {
+      window.RW2PhotoDash.render();
     }
 
     // ── Photo Tracks module: rebuild the station × visit grid on tab switch ──
@@ -38022,8 +38028,9 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     // Resize + watermark options (from the photos panel).
     // Downscale for the in-RAM display image (keeps the viewer fast). The full
     // original is stored separately (originals store) for save / copy / open.
-    var sizeEl = $('pp-size');
-    var maxSize = sizeEl ? (parseInt(sizeEl.value, 10) || 1600) : 1600;
+    // Size comes from the shared setting (map panel + Photos dashboard both write it).
+    var maxSize = 1600;
+    try { var _sv = parseInt(localStorage.getItem('rw_photo_maxsize'), 10); if (_sv) maxSize = _sv; } catch (e) {}
     var added = 0, noGpsIdx = 0, total = arr.length, done = 0;
     if (countEl) countEl.textContent = 'Importing 0 / ' + total + '…';
     var seq = Promise.resolve();

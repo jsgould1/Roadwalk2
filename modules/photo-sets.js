@@ -249,20 +249,17 @@
     return inp;
   }
 
+  // Prefer the Photos dashboard host; fall back to the map's Field Photos panel.
+  function setsHost() { return document.getElementById('pd-sets-host') || document.querySelector('#photos-panel .pp-body'); }
   function buildUI() {
-    var body = document.querySelector('#photos-panel .pp-body');
+    var body = setsHost();
     if (!body || $('ps-block')) return;
 
     var block = document.createElement('div');
     block.id = 'ps-block';
     block.style.cssText = 'margin-top:10px;padding-top:8px;border-top:2px solid var(--rule,#DDD7C8)';
     block.innerHTML =
-      '<div style="font:700 11px \'IBM Plex Mono\',monospace;letter-spacing:.06em;color:var(--blue,#0B3D66);margin-bottom:6px">PHOTO SETS · RAM</div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
-        '<button class="pp-btn" id="ps-folder" type="button" title="Upload one folder (incl. subfolders) as a single set">📁 Upload folder</button>' +
-        '<button class="pp-btn" id="ps-all" type="button" title="Point at the park photo root — each subfolder becomes its own set">🗂 Upload all (split)</button>' +
-      '</div>' +
-      '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">' +
         '<button class="pp-btn" id="ps-load-all" type="button" title="Bring every set\'s images back into RAM">⤓ Load all</button>' +
         '<button class="pp-btn" id="ps-offload-all" type="button" title="Free RAM: offload every set\'s images (tags + markers stay)">☁ Offload all</button>' +
       '</div>' +
@@ -270,18 +267,6 @@
       '<div id="ps-status" style="margin-top:6px;font:500 11px system-ui;color:var(--mute,#9BA0A8)"></div>';
     body.appendChild(block);
 
-    var dirInp = makeDirInput(), allInp = makeDirInput();
-    $('ps-folder').addEventListener('click', function () { dirInp.value = ''; dirInp.click(); });
-    $('ps-all').addEventListener('click', function () { allInp.value = ''; allInp.click(); });
-    dirInp.addEventListener('change', function () {
-      var files = dirInp.files; if (!files || !files.length) return;
-      var g = {}; g[oneSetName(files)] = Array.prototype.slice.call(files);
-      importGroups(g);
-    });
-    allInp.addEventListener('change', function () {
-      var files = allInp.files; if (!files || !files.length) return;
-      importGroups(splitBySubfolder(files));
-    });
     $('ps-offload-all').addEventListener('click', function () {
       status('Offloading all sets…');
       offloadAll().then(function (n) { status('Offloaded ' + n + ' image(s) — RAM freed.'); renderSets(); });
@@ -298,10 +283,12 @@
   }
 
   function whenReady() {
-    if (document.querySelector('#photos-panel .pp-body')) { buildUI(); return; }
+    // Prefer the Photos dashboard host; wait for it, then fall back to the map
+    // panel only if the dashboard never appears.
     var tries = 0, iv = setInterval(function () {
-      if (document.querySelector('#photos-panel .pp-body') || ++tries > 40) { clearInterval(iv); buildUI(); }
-    }, 250);
+      if (document.getElementById('pd-sets-host')) { clearInterval(iv); buildUI(); return; }
+      if (++tries > 24) { clearInterval(iv); if (setsHost()) buildUI(); }
+    }, 200);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', whenReady);
   else whenReady();
