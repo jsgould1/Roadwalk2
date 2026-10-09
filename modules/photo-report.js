@@ -65,6 +65,34 @@
     return Promise.resolve(p && p.dataUrl || null);
   }
 
+  // Printed photo cells are small, so the stored ~1600px display image is far
+  // bigger than the page needs. Re-encode each image to PRINT_MAX px on the
+  // long edge (JPEG) just for the print window — cuts the inlined base64 by
+  // ~50-70%, so the browser's Save-as-PDF rasterization is much faster. Images
+  // already at/under the cap pass through untouched. Never throws: on any
+  // failure the original data URL is returned.
+  var PRINT_MAX = 1100, PRINT_Q = 0.8;
+  function downscaleForPrint(dataUrl) {
+    if (!dataUrl || dataUrl.indexOf('data:image') !== 0) return Promise.resolve(dataUrl);
+    return new Promise(function (resolve) {
+      var img = new Image();
+      img.onload = function () {
+        var long = Math.max(img.naturalWidth, img.naturalHeight);
+        if (!long || long <= PRINT_MAX) { resolve(dataUrl); return; }
+        try {
+          var s = PRINT_MAX / long;
+          var c = document.createElement('canvas');
+          c.width = Math.max(1, Math.round(img.naturalWidth * s));
+          c.height = Math.max(1, Math.round(img.naturalHeight * s));
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          resolve(c.toDataURL('image/jpeg', PRINT_Q));
+        } catch (e) { resolve(dataUrl); }
+      };
+      img.onerror = function () { resolve(dataUrl); };
+      img.src = dataUrl;
+    });
+  }
+
   // ---- layout rule -----------------------------------------------------------
   // For n photos on a page (1..6): visual rows + which cell indices span both cols.
   function layoutFor(n) {
@@ -102,7 +130,7 @@
       fetchLogoFile('aecom-logo-black.png'),
       fetchLogoFile('nps-logo.png'),
       loadParkNames(),
-      Promise.all(ids.map(function (id) { return imageFor(id).then(function (d) { return { id: id, d: d }; }); })),
+      Promise.all(ids.map(function (id) { return imageFor(id).then(downscaleForPrint).then(function (d) { return { id: id, d: d }; }); })),
     ]).then(function (all) {
         var blackLogo = all[0], npsLogo = all[1], res = all[3];
         var img = {}; var missing = 0;
