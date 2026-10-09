@@ -278,7 +278,7 @@
       '.phdr .nps-logo{height:48px;width:auto;object-fit:contain;flex:0 0 auto}' +
       '.phdr .pk{font-weight:800;font-size:17px;color:#16315E;letter-spacing:.2px;line-height:1.12;white-space:normal}' +
       '.phdr .sc{flex:1 1 auto;text-align:right;align-self:flex-end;display:flex;flex-direction:column;align-items:flex-end;line-height:1.15}' +
-      '.phdr .sc .sc-id{font-weight:800;font-size:11.5px;color:#16315E;letter-spacing:.4px}' +
+      '.phdr .sc .sc-id{font-weight:700;font-size:14px;color:#16315E;letter-spacing:.4px}' +
       '.phdr .sc .sc-nm{font-weight:700;font-size:14px;color:#5b6673;white-space:normal}' +
       '.grid{flex:1 1 auto;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(var(--rows),1fr);gap:0.16in;min-height:0}' +
       '.cell{display:flex;flex-direction:column;min-height:0;min-width:0}' +
