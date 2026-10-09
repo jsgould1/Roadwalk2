@@ -101,12 +101,14 @@
     Promise.all([
       fetchLogoFile('aecom-logo-black.png'),
       fetchLogoFile('nps-logo.png'),
+      loadParkNames(),
       Promise.all(ids.map(function (id) { return imageFor(id).then(function (d) { return { id: id, d: d }; }); })),
     ]).then(function (all) {
-        var blackLogo = all[0], npsLogo = all[1], res = all[2];
+        var blackLogo = all[0], npsLogo = all[1], res = all[3];
         var img = {}; var missing = 0;
         res.forEach(function (r) { if (r.d) img[r.id] = r.d; else missing++; });
-        var park = ($('pr-park') && $('pr-park').value) || _parkName || (rip() && rip().state && rip().state.bundle && rip().state.bundle.park) || '';
+        var code = (rip() && rip().state && rip().state.bundle && rip().state.bundle.park) || '';
+        var park = ($('pr-park') && $('pr-park').value) || _parkName || parkFullName(code) || code;
         var wmOn = !$('pr-wm') || $('pr-wm').checked;
         // Prefer the official black AECOM logo; fall back to the app reverse logo, darkened.
         var aecomLogo = blackLogo || (document.querySelector('.aecom-logo') || {}).src || '';
@@ -132,6 +134,24 @@
   // 16-point compass heading: 110° → "ESE".
   var _CARD16 = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
   function cardinal(deg) { return _CARD16[Math.round((((+deg % 360) + 360) % 360) / 22.5) % 16]; }
+
+  // NPS unit code -> full park name (from nps-park-names.json; cached).
+  var _parkNames = null, _parkNamesP = null;
+  function loadParkNames() {
+    if (_parkNames) return Promise.resolve(_parkNames);
+    if (_parkNamesP) return _parkNamesP;
+    _parkNamesP = fetch('nps-park-names.json', { cache: 'force-cache' })
+      .then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (j) { _parkNames = j || {}; return _parkNames; })
+      .catch(function () { _parkNames = {}; return _parkNames; });
+    return _parkNamesP;
+  }
+  function parkFullName(code) {
+    if (!code) return '';
+    var n = _parkNames && _parkNames[code];
+    return (n && typeof n === 'string' && n.charAt(0) !== '_') ? n : code;
+  }
+  window.RW2ParkNames = { load: loadParkNames, full: parkFullName };
 
   // Load a logo file from the app root as a data URI (cached once per name).
   var _logoCache = {};
@@ -217,7 +237,7 @@
       '.page:last-child{page-break-after:auto;break-after:auto}' +
       // header: NPS logo + full park name (navy) at top-left, section at right
       '.phdr{display:flex;align-items:center;gap:10px;border-bottom:2px solid #16315E;padding-bottom:6px;margin-bottom:9px;flex:0 0 auto}' +
-      '.phdr .nps-logo{height:22px;width:auto;object-fit:contain;flex:0 0 auto}' +
+      '.phdr .nps-logo{height:24px;width:auto;object-fit:contain;flex:0 0 auto}' +
       '.phdr .pk{font-weight:800;font-size:17px;color:#16315E;letter-spacing:.2px}' +
       '.phdr .sc{font-weight:600;font-size:12px;color:#5b6673;flex:1 1 auto;text-align:right}' +
       '.grid{flex:1 1 auto;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(var(--rows),1fr);gap:0.16in;min-height:0}' +
@@ -353,19 +373,17 @@
       $('pr-go').addEventListener('click', generate);
       $('pr-hearted').addEventListener('change', renderBuilder);
       $('pr-wm').addEventListener('change', function () { try { localStorage.setItem('rw_export_watermark', $('pr-wm').checked ? '1' : '0'); } catch (e) {} });
-      // prefill park name from the loaded bundle, upgrade to full name if indexed
-      var code = (rip() && rip().state && rip().state.bundle && rip().state.bundle.park) || '';
-      $('pr-park').value = _parkName || code;
-      if (code) tryParkName(code).then(function (nm) { if (nm && !$('pr-park').value) $('pr-park').value = nm; else if (nm && $('pr-park').value === code) $('pr-park').value = nm; _parkName = $('pr-park').value; });
     }
     ov.classList.add('on');
     // Reflect the global export-watermark setting (save/copy/print share it).
     var pw = $('pr-wm'); if (pw) { try { pw.checked = localStorage.getItem('rw_export_watermark') !== '0'; } catch (e) {} }
     // Warm the route geometry so STA/MP are ready when Generate is clicked.
     if (window.RW2PhotoTag && window.RW2PhotoTag.ensureGeo) { try { window.RW2PhotoTag.ensureGeo(); } catch (e) {} }
-    // Auto-fill the Park field from the loaded park each time it opens (if empty).
+    // Auto-fill the Park field with the full park name for the loaded park.
     var code = (rip() && rip().state && rip().state.bundle && rip().state.bundle.park) || '';
-    var pf = $('pr-park'); if (pf && !pf.value && code) pf.value = code;
+    if (code) loadParkNames().then(function () {
+      var pf = $('pr-park'); if (pf && (!pf.value || pf.value === code)) { pf.value = parkFullName(code); _parkName = pf.value; }
+    });
     renderBuilder();
   }
   function closeOverlay() { var ov = $('pr-overlay'); if (ov) ov.classList.remove('on'); }
