@@ -27,3 +27,6 @@ Thumbs.db
 desktop.ini
 *.log
 *.tmp
+
+# --- Local safety backups (do not publish) ---
+index.BACKUP-*.html

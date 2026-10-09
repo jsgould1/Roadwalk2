@@ -421,23 +421,34 @@
       + esc(label) + (on ? (state.sort.dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
   }
 
+  // Count field photos tagged to each route ident (for the Assets → Photos jump).
+  function photoCountByRoute() {
+    const api = window._RW && window._RW.geophotos;
+    const m = new Map();
+    if (api && api.list) api.list().forEach((p) => { if (p.rip_route) m.set(p.rip_route, (m.get(p.rip_route) || 0) + 1); });
+    return m;
+  }
+
   // ---- tables -----------------------------------------------------------
   function assetsTable() {
     const cols = displayCols('assets');
     const rows = sortRows(filteredAssets(), (s, k) => k === 'ROUTE_IDENT' ? s.route_id : k === 'RTE_NAME' ? s.name : assetVal(s, k));
     const shown = rows.slice(0, state.limit);
+    const pc = photoCountByRoute();
     const body = shown.map((s) => {
       const isLot = s.type === 'area';
+      const n = pc.get(s.route_id) || 0;
+      const photoBtn = n ? '<button data-photos="' + esc(s.route_id) + '" title="Jump to this route\'s ' + n + ' photo' + (n === 1 ? '' : 's') + '" style="border:0;background:transparent;cursor:pointer;font-size:12px;color:#0B3D66;font-weight:700;margin-left:2px">📷' + n + '</button>' : '';
       return '<tr data-detail="' + esc(s.id) + '" style="border-bottom:1px solid #f2f5f8;cursor:pointer">'
         + '<td style="padding:5px 9px" data-nodetail="1"><input type="checkbox" data-scope="' + esc(s.id) + '"' + (s.in_scope ? ' checked' : '') + '></td>'
         + cols.map((k) => k === 'ROUTE_IDENT' ? cell(k, s.route_id) : k === 'RTE_NAME' ? cell(k, s.name) : cell(k, assetVal(s, k), { isLot })).join('')
-        + '<td style="padding:5px 9px" data-nodetail="1"><button data-goto="' + esc(s.id) + '" title="Show on map" style="border:0;background:transparent;cursor:pointer;font-size:14px">🗺</button></td></tr>';
+        + '<td style="padding:5px 9px;white-space:nowrap" data-nodetail="1"><button data-goto="' + esc(s.id) + '" title="Show on map" style="border:0;background:transparent;cursor:pointer;font-size:14px">🗺</button>' + photoBtn + '</td></tr>';
     }).join('');
     return { total: rows.length, shown: shown.length, html:
       '<table style="width:100%;border-collapse:collapse;font:13px system-ui"><thead><tr>'
       + '<th style="position:sticky;top:0;background:#f7f9fb;z-index:1;padding:7px 9px;border-bottom:1px solid #e3e8ee;width:26px"></th>'
       + cols.map((k) => th(k, colLabel(k))).join('')
-      + '<th style="position:sticky;top:0;background:#f7f9fb;border-bottom:1px solid #e3e8ee;width:30px"></th>'
+      + '<th style="position:sticky;top:0;background:#f7f9fb;border-bottom:1px solid #e3e8ee;width:72px"></th>'
       + '</tr></thead><tbody>' + body + '</tbody></table>' };
   }
   // A stacked bar showing what fraction of a route's length sits in each PCR
@@ -719,7 +730,65 @@
     return html.join('');
   }
 
-  const TABS = [['assets', 'Assets'], ['conditions', 'Conditions'], ['geometry', 'Geometry'], ['analysis', 'Δ Cycle 6→7'], ['custom', 'Custom']];
+  const TABS = [['assets', 'Assets'], ['conditions', 'Conditions'], ['geometry', 'Geometry'], ['analysis', 'Δ Cycle 6→7'], ['custom', 'Custom'], ['photos', 'Photos']];
+
+  // ---- Photos tab: field photos grouped by the section (route/lot) they were
+  //      auto-tagged to (photo-autotag writes p.rip_route / p.rip_lot). -------
+  function photosTable() {
+    const api = window._RW && window._RW.geophotos;
+    if (!api || !api.list) return { html: '<div style="padding:40px;text-align:center;color:#8a949f">Field photos module not loaded.</div>' };
+    const photos = api.list();
+    if (!photos.length) return { html: '<div style="padding:40px;text-align:center;color:#8a949f">No field photos yet. Import photos, then use <b>Tag photos to routes</b> in the Photo Triage module.</div>' };
+
+    // group: route ident → photos; lot-only → "lot:IDENT"; else Unassigned
+    const groups = new Map();      // key → { title, kind, photos:[] }
+    const keyFor = (p) => p.rip_route ? p.rip_route : (p.rip_lot ? 'lot:' + p.rip_lot : '__un__');
+    photos.forEach((p) => {
+      const k = keyFor(p);
+      if (!groups.has(k)) {
+        let title;
+        if (p.rip_route) title = p.rip_route + (p.rip_route_name ? ' · ' + p.rip_route_name : '');
+        else if (p.rip_lot) title = '🅿 ' + p.rip_lot + (p.rip_lot_name ? ' · ' + p.rip_lot_name : '');
+        else title = 'Unassigned (not tagged to a route)';
+        groups.set(k, { title, kind: p.rip_route ? 'route' : (p.rip_lot ? 'lot' : 'un'), photos: [] });
+      }
+      groups.get(k).photos.push(p);
+    });
+    // order: routes (by ident), then lots, then unassigned
+    const keys = [...groups.keys()].sort((a, b) => {
+      const rank = (k) => k === '__un__' ? 2 : (k.indexOf('lot:') === 0 ? 1 : 0);
+      const ra = rank(a), rb = rank(b);
+      return ra !== rb ? ra - rb : (a < b ? -1 : 1);
+    });
+
+    const OFF = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#ECE8DC"/><text x="40" y="38" font-family="system-ui" font-size="22" text-anchor="middle" fill="#9BA0A8">☁</text><text x="40" y="56" font-family="system-ui" font-size="9" text-anchor="middle" fill="#9BA0A8">offloaded</text></svg>');
+    let html = '<div style="padding:12px 14px">';
+    keys.forEach((k) => {
+      const g = groups.get(k);
+      const hearted = g.photos.filter((p) => p.hearted).length;
+      html += '<div' + (g.kind === 'route' ? ' id="rip-psec-' + esc(k) + '"' : '') + ' style="margin-bottom:16px;scroll-margin-top:8px">'
+        + '<div style="font:700 13px system-ui;color:#12233b;padding:6px 0;border-bottom:2px solid ' + (g.kind === 'route' ? '#0B3D66' : g.kind === 'lot' ? '#5A8F3E' : '#cfd6dd') + ';margin-bottom:9px">'
+        + esc(g.title) + ' <span style="font-weight:600;color:#8a949f">· ' + g.photos.length + ' photo' + (g.photos.length === 1 ? '' : 's')
+        + ' · <span data-rip-hcount="' + esc(k) + '">♥ ' + hearted + '</span></span></div>'
+        + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px">';
+      g.photos.forEach((p) => {
+        const src = p.dataUrl || OFF;
+        const cap = (p.description || '');
+        html += '<div data-rip-card="' + esc(p.id) + '" '
+          + 'style="position:relative;border:1px solid #e3e8ee;border-radius:7px;overflow:hidden;background:#fff' + (p.hearted ? ';box-shadow:0 0 0 2px #C85A2B' : '') + '">'
+          + '<div data-rip-go="' + esc(p.id) + '" title="Jump to this photo on the map" style="height:84px;cursor:pointer;background:#f4f1e8 center/cover no-repeat;background-image:url(' + src + ')"></div>'
+          + '<button data-rip-heart="' + esc(p.id) + '" title="Heart = include in photo report" '
+          + 'style="position:absolute;top:4px;right:4px;width:24px;height:24px;border-radius:50%;border:0;cursor:pointer;font-size:13px;line-height:1;'
+          + (p.hearted ? 'background:#C85A2B;color:#fff' : 'background:rgba(255,255,255,.9);color:#C85A2B') + ';box-shadow:0 1px 3px rgba(0,0,0,.25)">' + (p.hearted ? '♥' : '♡') + '</button>'
+          + '<input data-rip-cap="' + esc(p.id) + '" value="' + esc(cap) + '" placeholder="Add description…" '
+          + 'style="width:100%;box-sizing:border-box;border:0;border-top:1px solid #eef1f4;font:500 10.5px system-ui;color:#33414f;padding:4px 5px">'
+          + '</div>';
+      });
+      html += '</div></div>';
+    });
+    html += '</div>';
+    return { html };
+  }
 
   // Kick off a Cycle 7 fetch for the current park when it's needed (Cycle 7
   // view or the Analysis tab). Cache-first; re-renders when it lands.
@@ -885,9 +954,10 @@
     else if (state.tab === 'geometry') tbl = geometryTable();
     else if (state.tab === 'analysis') tbl = analysisTable();
     else if (state.tab === 'custom') tbl = customTable();
+    else if (state.tab === 'photos') tbl = photosTable();
     else tbl = assetsTable();
 
-    const showFilters = state.tab !== 'custom' && state.tab !== 'analysis';
+    const showFilters = state.tab !== 'custom' && state.tab !== 'analysis' && state.tab !== 'photos';
     const unit = state.tab === 'conditions' ? 'segments' : 'routes';
 
     // Cycle selector state (drives the Conditions tab data source).
@@ -964,7 +1034,7 @@
           + '<button id="rip-collapse-all" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">Collapse all</button>' : '')
       + (state.tab === 'custom' ? '<button id="rip-cust-add" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">+ Field</button>' : '')
       + ((state.tab === 'assets' || state.tab === 'conditions') ? '<button id="rip-cols-btn" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">Columns ▾</button>' : '')
-      + (state.tab !== 'custom' ? '<button id="rip-csv" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">⬇ CSV</button>' : '')
+      + (state.tab !== 'custom' && state.tab !== 'photos' ? '<button id="rip-csv" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">⬇ CSV</button>' : '')
       + '</div></div>'
 
       + '<div style="background:#fff;border:1px solid #e3e8ee;border-radius:0 12px 12px 12px;overflow:hidden">'
@@ -987,6 +1057,53 @@
     host.querySelectorAll('[data-kind]').forEach((b) => b.onclick = () => set(() => { state.kind = b.dataset.kind; }));
     host.querySelectorAll('[data-scope-f]').forEach((b) => b.onclick = () => set(() => { state.scope = b.dataset.scopeF; }));
     host.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => set(() => { state.tab = b.dataset.tab; }));
+
+    // Assets → Photos: jump to the Photos tab, focused on this route's section.
+    host.querySelectorAll('[data-photos]').forEach((b) => b.onclick = (e) => {
+      e.stopPropagation();
+      state.photoFocus = b.dataset.photos;
+      set(() => { state.tab = 'photos'; });
+    });
+
+    // Photos tab — thumbnail click → fly to the photo on the map.
+    const photoGet = (id) => { const api = window._RW && window._RW.geophotos; return api && api.get && api.get(id); };
+    host.querySelectorAll('[data-rip-go]').forEach((el) => el.onclick = () => {
+      const p = photoGet(el.getAttribute('data-rip-go')); if (!p) return;
+      if (RW().openMap) RW().openMap(); else if (window.showModule) window.showModule('map');
+      setTimeout(() => {
+        const m = window._RW && window._RW.state && window._RW.state.map;
+        if (m && isFinite(p.lat) && isFinite(p.lng)) m.setView([p.lat, p.lng], Math.max(m.getZoom() || 0, 18));
+      }, 250);
+    });
+    // Photos tab — heart toggle (updates in place, no full re-render).
+    host.querySelectorAll('[data-rip-heart]').forEach((btn) => btn.onclick = (e) => {
+      e.stopPropagation();
+      const p = photoGet(btn.getAttribute('data-rip-heart')); if (!p) return;
+      p.hearted = !p.hearted;
+      if (window._RW.geophotos.save) window._RW.geophotos.save(p);
+      btn.textContent = p.hearted ? '♥' : '♡';
+      btn.style.background = p.hearted ? '#C85A2B' : 'rgba(255,255,255,.9)';
+      btn.style.color = p.hearted ? '#fff' : '#C85A2B';
+      const card = btn.closest('[data-rip-card]'); if (card) card.style.boxShadow = p.hearted ? '0 0 0 2px #C85A2B' : '';
+      // refresh the group's ♥ count label
+      const key = p.rip_route || (p.rip_lot ? 'lot:' + p.rip_lot : '__un__');
+      const hc = host.querySelector('[data-rip-hcount="' + (window.CSS && CSS.escape ? CSS.escape(key) : key) + '"]');
+      if (hc) { const api = window._RW.geophotos; const n = api.list().filter((x) => (x.rip_route || (x.rip_lot ? 'lot:' + x.rip_lot : '__un__')) === key && x.hearted).length; hc.textContent = '♥ ' + n; }
+      if (window.RW2PhotoReport && document.getElementById('pr-overlay') && document.getElementById('pr-overlay').classList.contains('on')) { try { window.RW2PhotoReport.open(); } catch (_) {} }
+    });
+    // Photos tab — caption edit (saves on change, no re-render).
+    host.querySelectorAll('[data-rip-cap]').forEach((inp) => {
+      inp.onclick = (e) => e.stopPropagation();
+      inp.onchange = () => { const p = photoGet(inp.getAttribute('data-rip-cap')); if (p) { p.description = inp.value; if (window._RW.geophotos.save) window._RW.geophotos.save(p); } };
+    });
+    // If we arrived from an Assets 📷 jump, scroll that route's section in.
+    if (state.tab === 'photos' && state.photoFocus) {
+      const target = document.getElementById('rip-psec-' + state.photoFocus);
+      state.photoFocus = null;
+      if (target) { try { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) { target.scrollIntoView(); }
+        target.style.transition = 'background .2s'; target.style.background = '#FFF6E8';
+        setTimeout(() => { target.style.background = ''; }, 1400); }
+    }
     host.querySelectorAll('[data-facet]').forEach((s) => s.onchange = () => set(() => { state.facets[s.dataset.facet] = s.value; }));
     host.querySelectorAll('[data-sort]').forEach((h) => h.onclick = () => set(() => {
       const k = h.dataset.sort; if (state.sort.key === k) state.sort.dir *= -1; else state.sort = { key: k, dir: 1 };

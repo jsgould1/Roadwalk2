@@ -101,7 +101,7 @@
 <script src="modules/library.js" defer></script>
 <script src="modules/route-tools.js" defer></script>
 <script src="modules/aecom-toggle.js?v=2" defer></script>
-<script src="modules/rip-data.js?v=8" defer></script>
+<script src="modules/rip-data.js?v=10" defer></script>
 <script src="modules/rip-import.js?v=2" defer></script>
 <script src="modules/rip-map.js?v=14" defer></script>
 <script src="modules/rip-pathweb.js?v=2" defer></script>
@@ -117,6 +117,10 @@
 <script src="modules/snapshots.js" defer></script>
 <script src="modules/map-tools.js?v=4" defer></script>
 <script src="modules/flip-sta.js" defer></script>
+<script src="modules/photo-sets.js?v=1" defer></script>
+<script src="modules/photo-autotag.js?v=1" defer></script>
+<script src="modules/photo-route-view.js?v=1" defer></script>
+<script src="modules/photo-report.js?v=1" defer></script>
 
 <style>
 /* ============================================================
@@ -4254,6 +4258,11 @@ body.rw-sld-photo-dragging .strip-pin {
   box-shadow: 0 1px 3px rgba(0,0,0,0.55);
 }
 .gp-dot.gp-dot-grp { left: 11px; top: 11px; width: 22px; height: 22px; }
+/* Hearted (double-clicked → included in the photo report) — orange dot + halo. */
+.gp-marker.gp-hearted .gp-dot {
+  background: #C85A2B; border-color: #fff;
+  box-shadow: 0 0 0 3px rgba(200,90,43,0.35), 0 1px 3px rgba(0,0,0,0.55);
+}
 /* Rotating wrapper — spins the triangle around the circle centre (22,22) */
 .gp-rot {
   position: absolute; left: 0; top: 0;
@@ -30176,6 +30185,11 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     const saveBtn  = document.getElementById('dlm-save-btn');
     if (!modal) return;
 
+    // Daily check-in popup hidden for now. The Daily Log module still works;
+    // only this on-load reminder is suppressed. Re-enable with:
+    //   localStorage.setItem('rw_show_daily_log','1')
+    try { if (localStorage.getItem('rw_show_daily_log') !== '1') return; } catch (_) { return; }
+
     const todayKey = _todayKey();
 
     // Pre-fill inspector names from the last log (crew is usually the same).
@@ -37458,9 +37472,19 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
 
   // Hover tooltip — HTML chip with a thumbnail + description + the photo's
   // group / link state. Touch devices don't fire it; they tap → popup.
+  // Placeholder tile shown when a photo's image has been offloaded from RAM
+  // (its set is toggled OFF). Metadata, tags and the map marker all persist;
+  // only the pixels are gone until the set is turned back on.
+  var _OFFLOADED_SRC = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120">' +
+    '<rect width="120" height="120" fill="#ECE8DC"/>' +
+    '<text x="60" y="56" font-family="system-ui" font-size="30" text-anchor="middle" fill="#9BA0A8">☁</text>' +
+    '<text x="60" y="82" font-family="system-ui" font-size="11" text-anchor="middle" fill="#9BA0A8">offloaded</text></svg>');
+  function _imgSrc(p) { return (p && p.dataUrl) ? p.dataUrl : _OFFLOADED_SRC; }
+
   function tipFor(p) {
     var parts = [];
-    parts.push('<img src="' + p.dataUrl + '" alt="">');
+    parts.push('<img src="' + _imgSrc(p) + '" alt="">');
     var d = (p.description || '').trim();
     if (d) parts.push('<div class="gp-tt-desc">' + escapeHtml(d) + '</div>');
     var subs = [];
@@ -37486,6 +37510,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     var classes = 'gp-marker';
     if (p.asset_group_id) classes += ' gp-grouped';
     if (p.linked_pin_id)  classes += ' gp-linked';
+    if (p.hearted)        classes += ' gp-hearted';
     var html = (b != null && isFinite(b)
         ? '<div class="gp-rot" style="transform:rotate(' + b + 'deg)"><div class="gp-tri"></div></div>'
         : '') +
@@ -37536,6 +37561,19 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
           _finishGroupWith(p);
         }
       });
+      // Double-click toggles "hearted" (include in the photo report) and
+      // swaps the dot to its hearted colour. Persisted on the record.
+      m.on('dblclick', function (ev) {
+        if (ev && ev.originalEvent) { ev.originalEvent.preventDefault(); ev.originalEvent.stopPropagation(); }
+        if (window.L && L.DomEvent && ev && ev.originalEvent) L.DomEvent.stop(ev.originalEvent);
+        p.hearted = !p.hearted;
+        var el = m.getElement(); if (el) el.classList.toggle('gp-hearted', !!p.hearted);
+        dbPut(p);
+        if (window.RW2PhotoReport && document.getElementById('pr-overlay')
+            && document.getElementById('pr-overlay').classList.contains('on')) {
+          try { window.RW2PhotoReport.open(); } catch (e) {}
+        }
+      });
       m.on('dragend', function () {
         var ll = m.getLatLng();
         p.lat = ll.lat; p.lng = ll.lng;
@@ -37565,7 +37603,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     members.forEach(function (p) {
       var im = document.createElement('img');
       im.className = 'gp-pop-thumb';
-      im.src = p.dataUrl;
+      im.src = _imgSrc(p);
       im.title = p.description || '';
       if (p.id === focusedPhoto.id) im.style.borderColor = _groupColor(gid);
       im.addEventListener('click', function () {
@@ -37595,9 +37633,10 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     box.className = 'gp-pop';
     var img = document.createElement('img');
     img.className = 'gp-pop-img';
-    img.src = p.dataUrl;
-    img.title = 'Open full size';
+    img.src = _imgSrc(p);
+    img.title = p.dataUrl ? 'Open full size' : 'Image offloaded — turn its photo set back on';
     img.addEventListener('click', function () {
+      if (!p.dataUrl) return;
       var w = window.open('', '_blank');
       if (w) w.document.write('<img src="' + p.dataUrl + '" style="max-width:100%">');
     });
@@ -37605,6 +37644,28 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     meta.className = 'gp-pop-meta';
     meta.textContent = p.lat.toFixed(6) + ', ' + p.lng.toFixed(6) +
       (p.bearing != null && isFinite(p.bearing) ? '  ·  bearing ' + Math.round(p.bearing) + '°' : '');
+
+    // RIP route / lot tags written by the auto-tag tool, shown so the photo's
+    // section assignment is visible right on the map.
+    if (p.rip_route) {
+      var rt = document.createElement('div');
+      rt.className = 'gp-pop-route';
+      rt.style.cssText = 'margin-top:4px;font:600 11.5px system-ui;color:#0B3D66';
+      rt.innerHTML = '🛣 ' + escapeHtml(p.rip_route) +
+        (p.rip_route_name ? ' · ' + escapeHtml(p.rip_route_name) : '') +
+        (p.rip_route_ft != null ? ' · ' + Math.round(p.rip_route_ft) + ' ft' : '') +
+        (p.rip_route_fmss ? ' · FMSS ' + escapeHtml(p.rip_route_fmss) : '') +
+        (p.rip_route_ambig ? ' <span style="color:#C85A2B">(near 2+ routes)</span>' : '');
+      meta.appendChild(rt);
+    }
+    if (p.rip_lot) {
+      var lt = document.createElement('div');
+      lt.style.cssText = 'margin-top:2px;font:600 11.5px system-ui;color:#5A8F3E';
+      lt.innerHTML = '🅿️ ' + escapeHtml(p.rip_lot) +
+        (p.rip_lot_name ? ' · ' + escapeHtml(p.rip_lot_name) : '') +
+        (p.rip_lot_inside ? ' · inside' : (p.rip_lot_ft != null ? ' · ' + Math.round(p.rip_lot_ft) + ' ft' : ''));
+      meta.appendChild(lt);
+    }
 
     // Status line for current link/group state.
     var status = _statusLine(p);
@@ -37847,9 +37908,9 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       ? (PHOTOS.length + ' photo' + (PHOTOS.length > 1 ? 's' : '') + ' stored')
       : 'No photos yet.';
   }
-  function handleFiles(files) {
+  function handleFiles(files, setName) {
     var arr = Array.prototype.slice.call(files || []);
-    if (!arr.length) return;
+    if (!arr.length) return Promise.resolve(0);
     var map = rwMap();
     var center = (map && map.getCenter) ? map.getCenter() : { lat: 0, lng: 0 };
     var countEl = $('pp-count');
@@ -37888,6 +37949,9 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
               description: '',
               // Original capture time from EXIF when available, else import time.
               ts: (capTime || new Date()).toISOString(),
+              // Photo set this image belongs to (folder name), for RAM on/off.
+              _set: setName || null,
+              _name: (file && file.name) || null,
             };
             PHOTOS.push(rec);
             added++;
@@ -37900,7 +37964,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
           });
       });
     });
-    seq.then(function () {
+    return seq.then(function () {
       updateCount();
       if (added) {
         if (!photosVisible) {
@@ -37910,6 +37974,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         }
         render();
       }
+      return added;
     });
   }
   function persistVis() {
@@ -37972,7 +38037,9 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       });
     }
     dbAll().then(function (recs) {
-      PHOTOS = (recs || []).filter(function (r) { return r && r.dataUrl; });
+      // Keep metadata-only records too (image offloaded to free RAM): they
+      // carry tags + map markers even while their photo set is toggled off.
+      PHOTOS = (recs || []).filter(function (r) { return r && r.id; });
       updateCount();
       waitForMap();
     }, function () { waitForMap(); });
@@ -37991,7 +38058,15 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     list:        function () { return PHOTOS.slice(); },
     get:         function (id) { return PHOTOS.find(function (p) { return p.id === id; }) || null; },
     save:        function (p) { return dbPut(p); },
-    saveMany:    function (ps) { return Promise.all(ps.map(dbPut)); },
+    saveMany:    function (ps) { return Promise.all((ps || []).map(dbPut)); },
+    // Import image files into a named photo set (folder). Returns Promise<n>.
+    importFiles: function (files, setName) { return handleFiles(files, setName); },
+    // Remove a photo entirely (from RAM + IDB). Returns Promise.
+    remove:      function (id) {
+      var i = PHOTOS.findIndex(function (p) { return p.id === id; });
+      if (i !== -1) PHOTOS.splice(i, 1);
+      return dbDel(id);
+    },
     newGroupId:  _newGroupId,
     groupColor:  _groupColor,
     members:     _groupMembers,
