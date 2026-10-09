@@ -172,7 +172,8 @@
     }).join('');
     return '<section class="page" style="--rows:' + lay.rows + '">' +
       '<div class="phdr"><span class="pk">' + esc(park) + '</span>' +
-      '<span class="sc">' + esc(secTitle) + '</span></div>' +
+      '<span class="sc">' + esc(secTitle) + '</span>' +
+      '<span class="brand">AECOM</span></div>' +
       '<div class="grid">' + cells + '</div></section>';
   }
 
@@ -180,23 +181,26 @@
     var w = window.open('', '_blank');
     if (!w) { status('Pop-up blocked — allow pop-ups to print the report.'); return; }
     var css =
-      '@page{size:letter portrait;margin:0.5in}' +
+      '@page{size:letter portrait;margin:0.45in}' +
       '*{box-sizing:border-box}' +
       'html,body{margin:0;padding:0;font-family:"IBM Plex Sans",system-ui,sans-serif;color:#1A1D22}' +
-      '.page{height:10in;display:flex;flex-direction:column;page-break-after:always;overflow:hidden}' +
+      '.page{height:10.1in;display:flex;flex-direction:column;page-break-after:always;overflow:hidden}' +
       '.page:last-child{page-break-after:auto}' +
-      '.phdr{display:flex;align-items:baseline;gap:10px;border-bottom:2px solid #0B3D66;padding-bottom:5px;margin-bottom:10px;flex:0 0 auto}' +
-      '.phdr .pk{font-weight:700;font-size:15px;color:#0B3D66}' +
-      '.phdr .sc{font-weight:600;font-size:12.5px;color:#555}' +
-      '.grid{flex:1 1 auto;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(var(--rows),1fr);gap:0.22in;min-height:0}' +
+      '.phdr{display:flex;align-items:center;gap:12px;border-bottom:3px solid #0B3D66;padding-bottom:7px;margin-bottom:11px;flex:0 0 auto}' +
+      '.phdr .pk{font-weight:800;font-size:16px;color:#0B3D66;letter-spacing:.2px}' +
+      '.phdr .sc{font-weight:600;font-size:12.5px;color:#5b6673;flex:1 1 auto}' +
+      '.phdr .brand{font:800 13px "IBM Plex Sans",system-ui;color:#0B3D66;letter-spacing:2px}' +
+      '.grid{flex:1 1 auto;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(var(--rows),1fr);gap:0.16in;min-height:0}' +
       '.cell{display:flex;flex-direction:column;min-height:0;min-width:0}' +
       '.cell.full{grid-column:1 / -1}' +
-      '.imgbox{position:relative;flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;background:#F4F1E8;border:1px solid #DDD7C8}' +
-      '.imgbox img{max-width:100%;max-height:100%;object-fit:contain}' +
-      '.wm{position:absolute;left:0;bottom:0;max-width:100%;background:rgba(17,17,17,0.64);color:#fff;font:600 8px "IBM Plex Mono",monospace;letter-spacing:.2px;padding:3px 7px;border-radius:0 6px 0 0;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
-      '.wm div{line-height:1.4;white-space:pre}' +
-      '.wm .wm0{font-weight:700;font-size:9px}' +
-      '.cap{flex:0 0 auto;font-size:10.5px;line-height:1.3;color:#1A1D22;padding:4px 2px 0;min-height:14px}';
+      // edge-to-edge photo, rounded, no border — the "grid lines" are gone
+      '.imgbox{position:relative;flex:1 1 auto;min-height:0;overflow:hidden;border-radius:7px;background:#15171c;box-shadow:0 1px 3px rgba(0,0,0,.18);-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
+      '.imgbox img{width:100%;height:100%;object-fit:contain;display:block}' +
+      // full-width gradient caption bar across the bottom (not a corner box)
+      '.wm{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(to top,rgba(10,12,16,.88),rgba(10,12,16,.5) 58%,transparent);color:#fff;font:600 8px "IBM Plex Mono",monospace;letter-spacing:.2px;padding:22px 10px 8px;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
+      '.wm div{line-height:1.42;white-space:pre}' +
+      '.wm .wm0{font-weight:800;font-size:9.5px;letter-spacing:.4px}' +
+      '.cap{flex:0 0 auto;font-size:10px;line-height:1.3;color:#333;padding:4px 3px 0;min-height:12px}';
     w.document.open();
     w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>RoadWalk Photo Report</title><style>' + css + '</style></head><body>' + pagesHtml + '</body></html>');
     w.document.close();

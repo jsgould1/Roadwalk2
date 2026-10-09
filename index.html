@@ -120,7 +120,7 @@
 <script src="modules/photo-sets.js?v=3" defer></script>
 <script src="modules/photo-autotag.js?v=3" defer></script>
 <script src="modules/photo-route-view.js?v=4" defer></script>
-<script src="modules/photo-report.js?v=7" defer></script>
+<script src="modules/photo-report.js?v=8" defer></script>
 
 <style>
 /* ============================================================
@@ -4371,14 +4371,14 @@ body.rw-sld-photo-dragging .strip-pin {
   background: #fff; color: var(--ink, #222);
   border: 1px solid var(--rule, #d8dde2); border-radius: 5px;
   padding: 4px 4px 5px; box-shadow: 0 4px 14px rgba(0,0,0,0.28);
-  pointer-events: none; max-width: 336px;
+  pointer-events: none; max-width: 664px;
   font: 500 11px/1.3 'IBM Plex Sans', sans-serif;
   white-space: normal;
 }
 .leaflet-tooltip.gp-tooltip::before { display: none; }   /* drop the default arrow */
-/* Hover preview at 2x the base thumbnail size. */
+/* Large hover preview. */
 .gp-tooltip img {
-  display: block; width: 320px; height: 240px; object-fit: cover;
+  display: block; width: 640px; height: 480px; object-fit: cover;
   border-radius: 3px;
 }
 .gp-tooltip .gp-tt-desc {
