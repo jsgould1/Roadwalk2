@@ -422,11 +422,15 @@
       + esc(label) + (on ? (state.sort.dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
   }
 
-  // Count field photos tagged to each route ident (for the Assets → Photos jump).
+  // Count field photos tagged to each route OR lot ident (Assets → Photos jump).
+  // A photo on a road counts under its route; a lot-only photo counts under its lot.
   function photoCountByRoute() {
     const api = window._RW && window._RW.geophotos;
     const m = new Map();
-    if (api && api.list) api.list().forEach((p) => { if (p.rip_route) m.set(p.rip_route, (m.get(p.rip_route) || 0) + 1); });
+    if (api && api.list) api.list().forEach((p) => {
+      const k = p.rip_route || p.rip_lot;
+      if (k) m.set(k, (m.get(k) || 0) + 1);
+    });
     return m;
   }
 
@@ -751,7 +755,7 @@
         if (p.rip_route) title = p.rip_route + (p.rip_route_name ? ' · ' + p.rip_route_name : '');
         else if (p.rip_lot) title = '🅿 ' + p.rip_lot + (p.rip_lot_name ? ' · ' + p.rip_lot_name : '');
         else title = 'Unassigned (not tagged to a route)';
-        groups.set(k, { title, kind: p.rip_route ? 'route' : (p.rip_lot ? 'lot' : 'un'), photos: [] });
+        groups.set(k, { title, kind: p.rip_route ? 'route' : (p.rip_lot ? 'lot' : 'un'), ident: (p.rip_route || p.rip_lot || ''), photos: [] });
       }
       groups.get(k).photos.push(p);
     });
@@ -770,7 +774,7 @@
     keys.forEach((k) => {
       const g = groups.get(k);
       const hearted = g.photos.filter((p) => p.hearted).length;
-      html += '<div' + (g.kind === 'route' ? ' id="rip-psec-' + esc(k) + '"' : '') + ' style="margin-bottom:16px;scroll-margin-top:8px">'
+      html += '<div' + (g.ident ? ' id="rip-psec-' + esc(g.ident) + '"' : '') + ' style="margin-bottom:16px;scroll-margin-top:8px">'
         + '<div style="font:700 13px system-ui;color:#12233b;padding:6px 0;border-bottom:2px solid ' + (g.kind === 'route' ? '#0B3D66' : g.kind === 'lot' ? '#5A8F3E' : '#cfd6dd') + ';margin-bottom:9px">'
         + esc(g.title) + ' <span style="font-weight:600;color:#8a949f">· ' + g.photos.length + ' photo' + (g.photos.length === 1 ? '' : 's')
         + ' · <span data-rip-hcount="' + esc(k) + '">♥ ' + hearted + '</span></span></div>'

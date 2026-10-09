@@ -21,7 +21,8 @@
 
   function matches(p) {
     if (routeFilter === ALL) return true;
-    if (routeFilter === UNTAGGED) return !p.rip_route;
+    if (routeFilter === UNTAGGED) return !p.rip_route && !p.rip_lot;
+    if (routeFilter.indexOf('lot:') === 0) return p.rip_lot === routeFilter.slice(4);
     return p.rip_route === routeFilter;
   }
 
@@ -54,22 +55,28 @@
   // Build the <option> list from the photos' current route tags.
   function rebuildOptions() {
     var sel = $('prv-select'); if (!sel) return;
-    var g = geo(); var counts = {}, untagged = 0;
+    var g = geo(); var counts = {}, lots = {}, untagged = 0, nameOf = {}, lotName = {};
     (g ? g.list() : []).forEach(function (p) {
-      if (p.rip_route) counts[p.rip_route] = (counts[p.rip_route] || 0) + 1; else untagged++;
+      if (p.rip_route) { counts[p.rip_route] = (counts[p.rip_route] || 0) + 1; if (!nameOf[p.rip_route]) nameOf[p.rip_route] = p.rip_route_name || ''; }
+      else if (p.rip_lot) { lots[p.rip_lot] = (lots[p.rip_lot] || 0) + 1; if (!lotName[p.rip_lot]) lotName[p.rip_lot] = p.rip_lot_name || ''; }
+      else untagged++;
     });
     var idents = Object.keys(counts).sort();
-    var nameOf = {};
-    (g ? g.list() : []).forEach(function (p) { if (p.rip_route && !nameOf[p.rip_route]) nameOf[p.rip_route] = p.rip_route_name || ''; });
-    var total = idents.reduce(function (a, k) { return a + counts[k]; }, 0);
-    var html = '<option value="' + ALL + '">All ' + idents.length + ' route' + (idents.length === 1 ? '' : 's') + ' · ' + total + ' photo' + (total === 1 ? '' : 's') + '</option>';
+    var lotIds = Object.keys(lots).sort();
+    var total = idents.reduce(function (a, k) { return a + counts[k]; }, 0) + lotIds.reduce(function (a, k) { return a + lots[k]; }, 0);
+    var html = '<option value="' + ALL + '">All — ' + idents.length + ' route' + (idents.length === 1 ? '' : 's') +
+      (lotIds.length ? ' + ' + lotIds.length + ' lot' + (lotIds.length === 1 ? '' : 's') : '') + ' · ' + total + ' photos</option>';
     idents.forEach(function (k) {
       html += '<option value="' + esc(k) + '">' + esc(k) + (nameOf[k] ? ' · ' + esc(nameOf[k]) : '') + ' (' + counts[k] + ' photo' + (counts[k] === 1 ? '' : 's') + ')</option>';
+    });
+    lotIds.forEach(function (k) {
+      html += '<option value="lot:' + esc(k) + '">🅿 ' + esc(k) + (lotName[k] ? ' · ' + esc(lotName[k]) : '') + ' (' + lots[k] + ' photo' + (lots[k] === 1 ? '' : 's') + ')</option>';
     });
     if (untagged) html += '<option value="' + UNTAGGED + '">— untagged (' + untagged + ' photos) —</option>';
     var keep = sel.value;
     sel.innerHTML = html;
-    sel.value = [ALL, UNTAGGED].indexOf(keep) !== -1 || counts[keep] ? keep : ALL;
+    var keepOk = [ALL, UNTAGGED].indexOf(keep) !== -1 || counts[keep] || (keep && keep.indexOf('lot:') === 0 && lots[keep.slice(4)]);
+    sel.value = keepOk ? keep : ALL;
     routeFilter = sel.value;
   }
 
@@ -80,7 +87,7 @@
     block.id = 'prv-block';
     block.style.cssText = 'margin-top:10px;padding-top:8px;border-top:2px solid var(--rule,#DDD7C8)';
     block.innerHTML =
-      '<div style="font:700 11px \'IBM Plex Mono\',monospace;letter-spacing:.06em;color:var(--blue,#0B3D66);margin-bottom:6px">VIEW BY ROUTE</div>' +
+      '<div style="font:700 11px \'IBM Plex Mono\',monospace;letter-spacing:.06em;color:var(--blue,#0B3D66);margin-bottom:6px">VIEW BY ROUTE / LOT</div>' +
       '<select id="prv-select" title="Show only photos tagged to this route" ' +
         'style="width:100%;font:600 12px system-ui;padding:5px 7px;border:1px solid var(--rule,#DDD7C8);border-radius:6px;background:var(--paper,#FBFAF6);color:var(--ink,#1A1D22)">' +
         '<option value="' + ALL + '">All routes</option></select>' +
@@ -97,7 +104,8 @@
       zoomToFilter();
       var hint = $('prv-hint');
       if (hint) hint.textContent = routeFilter === ALL ? 'Showing all photos.' :
-        (routeFilter === UNTAGGED ? 'Showing untagged photos.' : 'Showing photos on ' + routeFilter + '.');
+        (routeFilter === UNTAGGED ? 'Showing untagged photos.' :
+          (routeFilter.indexOf('lot:') === 0 ? 'Showing photos in lot ' + routeFilter.slice(4) + '.' : 'Showing photos on ' + routeFilter + '.'));
     });
     installWrap();
     rebuildOptions();
