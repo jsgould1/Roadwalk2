@@ -217,7 +217,7 @@
       '.page:last-child{page-break-after:auto;break-after:auto}' +
       // header: NPS logo + full park name (navy) at top-left, section at right
       '.phdr{display:flex;align-items:center;gap:10px;border-bottom:2px solid #16315E;padding-bottom:6px;margin-bottom:9px;flex:0 0 auto}' +
-      '.phdr .nps-logo{height:30px;width:auto;object-fit:contain;flex:0 0 auto}' +
+      '.phdr .nps-logo{height:22px;width:auto;object-fit:contain;flex:0 0 auto}' +
       '.phdr .pk{font-weight:800;font-size:17px;color:#16315E;letter-spacing:.2px}' +
       '.phdr .sc{font-weight:600;font-size:12px;color:#5b6673;flex:1 1 auto;text-align:right}' +
       '.grid{flex:1 1 auto;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(var(--rows),1fr);gap:0.16in;min-height:0}' +
