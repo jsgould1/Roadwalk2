@@ -892,8 +892,12 @@
       document.body.appendChild(a); a.click(); a.remove();
     });
   }
-  // Shared so the map popup (a different module) can offer Save / Copy too.
-  window.RW2PhotoExport = { save: savePhoto, copy: copyPhoto };
+  // Shared so other modules (map popup, image overlay) can offer Save / Copy and
+  // get a full-size, watermarked image as a data URL.
+  window.RW2PhotoExport = {
+    save: savePhoto, copy: copyPhoto,
+    dataUrl: function (id) { return watermarkCanvas(id).then(function (c) { return c ? c.toDataURL('image/jpeg', 0.92) : null; }); },
+  };
 
   // Switch to the map, fly to a photo, and flash its marker so it's findable.
   function flyToPhoto(p) {

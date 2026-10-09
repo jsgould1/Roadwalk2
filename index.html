@@ -101,7 +101,7 @@
 <script src="modules/library.js" defer></script>
 <script src="modules/route-tools.js" defer></script>
 <script src="modules/aecom-toggle.js?v=2" defer></script>
-<script src="modules/rip-data.js?v=22" defer></script>
+<script src="modules/rip-data.js?v=23" defer></script>
 <script src="modules/rip-import.js?v=2" defer></script>
 <script src="modules/rip-map.js?v=14" defer></script>
 <script src="modules/rip-pathweb.js?v=2" defer></script>
@@ -37566,8 +37566,13 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     var imgEl = ov.querySelector('img');
     imgEl.src = _imgSrc(p);          // instant: downscaled display (or placeholder)
     ov.style.display = 'flex';
-    if (window._RW && window._RW.geophotos && window._RW.geophotos.original) {
-      window._RW.geophotos.original(p.id).then(function (blob) {   // upgrade to full-size original
+    // Upgrade to the full-size, WATERMARKED image (same stamp as save/copy/print).
+    if (window.RW2PhotoExport && window.RW2PhotoExport.dataUrl) {
+      window.RW2PhotoExport.dataUrl(p.id).then(function (url) {
+        if (url && ov.style.display !== 'none') imgEl.src = url;
+      });
+    } else if (window._RW && window._RW.geophotos && window._RW.geophotos.original) {
+      window._RW.geophotos.original(p.id).then(function (blob) {
         if (blob && ov.style.display !== 'none') { _gpOvUrl = URL.createObjectURL(blob); imgEl.src = _gpOvUrl; }
       });
     }
