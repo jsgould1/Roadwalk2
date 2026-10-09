@@ -214,9 +214,10 @@
     }).join('');
     var npsHtml = o.npsLogo ? '<img class="nps-logo" src="' + o.npsLogo + '" alt="NPS">' : '';
     var aecomHtml = o.aecomLogo ? '<img class="ftr-logo' + (o.aecomBlack ? ' blk' : '') + '" src="' + o.aecomLogo + '" alt="AECOM">' : '<span class="ftr-aecom">AECOM</span>';
+    var parkHtml = esc(o.park).replace(/ National\b/, '<br>National');
     return '<section class="page" style="--rows:' + lay.rows + '">' +
       '<div class="phdr">' + npsHtml +
-      '<span class="pk">' + esc(o.park) + '</span>' +
+      '<span class="pk">' + parkHtml + '</span>' +
       '<span class="sc">' + esc(o.secTitle) + '</span></div>' +
       '<div class="grid">' + cells + '</div>' +
       '<div class="pftr">' + aecomHtml +
@@ -237,8 +238,8 @@
       '.page:last-child{page-break-after:auto;break-after:auto}' +
       // header: NPS logo + full park name (navy) at top-left, section at right
       '.phdr{display:flex;align-items:center;gap:10px;border-bottom:2px solid #16315E;padding-bottom:6px;margin-bottom:9px;flex:0 0 auto}' +
-      '.phdr .nps-logo{height:24px;width:auto;object-fit:contain;flex:0 0 auto}' +
-      '.phdr .pk{font-weight:800;font-size:17px;color:#16315E;letter-spacing:.2px}' +
+      '.phdr .nps-logo{height:48px;width:auto;object-fit:contain;flex:0 0 auto}' +
+      '.phdr .pk{font-weight:800;font-size:17px;color:#16315E;letter-spacing:.2px;line-height:1.12;white-space:normal}' +
       '.phdr .sc{font-weight:600;font-size:12px;color:#5b6673;flex:1 1 auto;text-align:right}' +
       '.grid{flex:1 1 auto;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(var(--rows),1fr);gap:0.16in;min-height:0}' +
       '.cell{display:flex;flex-direction:column;min-height:0;min-width:0}' +
