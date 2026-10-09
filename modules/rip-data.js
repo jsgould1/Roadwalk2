@@ -1212,7 +1212,8 @@
       + (state.tab === 'custom' ? '<button id="rip-cust-add" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">+ Field</button>' : '')
       + ((state.tab === 'assets' || state.tab === 'conditions') ? '<button id="rip-cols-btn" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">Columns ▾</button>' : '')
       + (state.tab !== 'custom' && state.tab !== 'photos' ? '<button id="rip-csv" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">⬇ CSV</button>' : '')
-      + (state.tab === 'photos' ? '<span style="font-size:12px;color:#8a949f">Size</span><select id="rip-photo-size" style="border:1px solid #d3dae1;border-radius:8px;padding:4px 7px;font:12.5px system-ui;background:#fff">'
+      + (state.tab === 'photos' ? '<button id="rip-print-pdf" title="Heart photos, add captions, and print a photo-report PDF" style="border:0;background:#C85A2B;color:#fff;border-radius:8px;padding:6px 12px;cursor:pointer;font:700 12.5px system-ui">🖨 Print Photo PDF</button>'
+          + '<span style="font-size:12px;color:#8a949f">Size</span><select id="rip-photo-size" style="border:1px solid #d3dae1;border-radius:8px;padding:4px 7px;font:12.5px system-ui;background:#fff">'
           + [['small', 'Small'], ['med', 'Medium'], ['lg', 'Large'], ['xl', 'X-Large'], ['xxl', 'XX-Large']].map((o) => '<option value="' + o[0] + '"' + (state.photoSize === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('')
           + '</select>' : '')
       + '</div></div>'
@@ -1239,6 +1240,8 @@
     host.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => set(() => { state.tab = b.dataset.tab; }));
 
     // Photos tab: thumbnail size selector.
+    const prPdf = $('rip-print-pdf');
+    if (prPdf) prPdf.onclick = () => { if (window.RW2PhotoReport && window.RW2PhotoReport.open) window.RW2PhotoReport.open(); };
     const psz = $('rip-photo-size');
     if (psz) psz.onchange = () => { state.photoSize = psz.value; try { localStorage.setItem('rw_rip_photo_size', psz.value); } catch (e) {} render(); };
 
