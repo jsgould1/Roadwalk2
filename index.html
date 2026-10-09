@@ -101,7 +101,7 @@
 <script src="modules/library.js" defer></script>
 <script src="modules/route-tools.js" defer></script>
 <script src="modules/aecom-toggle.js?v=2" defer></script>
-<script src="modules/rip-data.js?v=15" defer></script>
+<script src="modules/rip-data.js?v=17" defer></script>
 <script src="modules/rip-import.js?v=2" defer></script>
 <script src="modules/rip-map.js?v=14" defer></script>
 <script src="modules/rip-pathweb.js?v=2" defer></script>
@@ -119,8 +119,8 @@
 <script src="modules/flip-sta.js" defer></script>
 <script src="modules/photo-sets.js?v=3" defer></script>
 <script src="modules/photo-autotag.js?v=2" defer></script>
-<script src="modules/photo-route-view.js?v=3" defer></script>
-<script src="modules/photo-report.js?v=4" defer></script>
+<script src="modules/photo-route-view.js?v=4" defer></script>
+<script src="modules/photo-report.js?v=6" defer></script>
 
 <style>
 /* ============================================================
@@ -4262,6 +4262,17 @@ body.rw-sld-photo-dragging .strip-pin {
 .gp-marker.gp-hearted .gp-dot {
   background: #C85A2B; border-color: #fff;
   box-shadow: 0 0 0 3px rgba(200,90,43,0.35), 0 1px 3px rgba(0,0,0,0.55);
+}
+/* Flown-to highlight — a pulsing blue ring so you can spot the target photo. */
+@keyframes gpFlyPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(26,115,232,0.75), 0 1px 3px rgba(0,0,0,0.55); }
+  70%  { box-shadow: 0 0 0 16px rgba(26,115,232,0),  0 1px 3px rgba(0,0,0,0.55); }
+  100% { box-shadow: 0 0 0 0 rgba(26,115,232,0),     0 1px 3px rgba(0,0,0,0.55); }
+}
+.gp-marker.gp-flyhi { z-index: 10000 !important; }
+.gp-marker.gp-flyhi .gp-dot {
+  background: #1A73E8; border-color: #fff; transform: scale(1.35);
+  animation: gpFlyPulse 1s ease-out 3;
 }
 /* Rotating wrapper — spins the triangle around the circle centre (22,22) */
 .gp-rot {
@@ -9555,15 +9566,9 @@ body.mobile-mode #app {
                 <span class="rw-dropzone-ico">⬇</span>
                 <span class="rw-dropzone-lbl">…or drop photos here</span>
               </div>
-              <label class="pp-opt"><span>Resize to</span>
-                <select id="pp-size">
-                  <option value="800">Small · 800 px</option>
-                  <option value="1200" selected>Medium · 1200 px</option>
-                  <option value="1600">Large · 1600 px</option>
-                  <option value="2400">X-Large · 2400 px</option>
-                </select>
-              </label>
-              <label class="pp-show"><input type="checkbox" id="pp-watermark"> Watermark (GPS + date/time)</label>
+              <!-- Photos are stored at full resolution (RAM is managed by photo
+                   sets / offload). The watermark is applied automatically on
+                   save / copy / print — toggle it in the Photo report. -->
               <label class="pp-show"><input type="checkbox" id="pp-show" checked> Show markers on map</label>
               <div class="pp-count" id="pp-count">No photos yet.</div>
               <div class="pp-hint">Photos with GPS data drop at their location; others
@@ -37355,7 +37360,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         ctx.drawImage(bmp, 0, 0, cw, ch);
         if (bmp.close) bmp.close();
         if (wm) { try { drawWatermark(ctx, cw, ch, wm); } catch (e) {} }
-        return cv.toDataURL('image/jpeg', 0.82);
+        return cv.toDataURL('image/jpeg', 0.9);
       });
     }
     return new Promise(function (res, rej) {
@@ -37959,9 +37964,8 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     var center = (map && map.getCenter) ? map.getCenter() : { lat: 0, lng: 0 };
     var countEl = $('pp-count');
     // Resize + watermark options (from the photos panel).
-    var sizeEl = $('pp-size');
-    var maxSize = sizeEl ? (parseInt(sizeEl.value, 10) || 1200) : 1200;
-    var wmOn = !!($('pp-watermark') && $('pp-watermark').checked);
+    // Store at full resolution — RAM is managed by photo sets / offload now.
+    var maxSize = 100000;
     var added = 0, noGpsIdx = 0, total = arr.length, done = 0;
     if (countEl) countEl.textContent = 'Importing 0 / ' + total + '…';
     var seq = Promise.resolve();
@@ -37971,10 +37975,10 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         return file.arrayBuffer().then(function (buf) {
           var gps = parseExif(buf);
           var capTime = (gps && gps.dateTime instanceof Date) ? gps.dateTime : null;
-          var wm = wmOn ? {
-            lat: gps && gps.lat, lng: gps && gps.lng, bearing: gps && gps.bearing,
-            dateTime: capTime,
-          } : null;
+          // Never burn the watermark into stored pixels — the full watermark
+          // (route + FMSS + STA + MP + GPS + date) is applied automatically on
+          // save / copy / print instead, so the stored image stays clean.
+          var wm = null;
           return makeThumb(file, maxSize, wm).then(function (dataUrl) {
             var lat, lng, bearing = null;
             if (gps && isFinite(gps.lat) && isFinite(gps.lng)) {
@@ -38067,9 +38071,10 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     }
     var wmChk = $('pp-watermark');
     if (wmChk) {
-      try { wmChk.checked = localStorage.getItem('rw_photo_watermark') === '1'; } catch (e) {}
+      // Controls the automatic export watermark (save / copy / print). Default ON.
+      try { wmChk.checked = localStorage.getItem('rw_export_watermark') !== '0'; } catch (e) { wmChk.checked = true; }
       wmChk.addEventListener('change', function () {
-        try { localStorage.setItem('rw_photo_watermark', wmChk.checked ? '1' : '0'); } catch (e) {}
+        try { localStorage.setItem('rw_export_watermark', wmChk.checked ? '1' : '0'); } catch (e) {}
       });
     }
     var upBtn = $('pp-upload'), fileInp = $('pp-file');
@@ -38124,6 +38129,19 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     setCover:    _setCover,
     resolveLink: _resolveLink,
     refresh:     function () { render(); updateCount(); },
+    // Flash a photo's marker (and open its popup) so you can see which photo a
+    // "fly to" landed on. Retries briefly in case the layer is still rendering.
+    highlight:   function (id) {
+      var tries = 0;
+      (function go() {
+        var found = null;
+        if (photoLayer) photoLayer.eachLayer(function (mk) { if (mk._gpPhotoId === id) found = mk; });
+        if (!found) { if (++tries < 12) setTimeout(go, 150); return; }
+        var el = found.getElement();
+        if (el) { el.classList.add('gp-flyhi'); setTimeout(function () { try { el.classList.remove('gp-flyhi'); } catch (e) {} }, 3000); }
+        try { found.openPopup(); } catch (e) {}
+      })();
+    },
     centroid:    function (ids) {
       var sel = PHOTOS.filter(function (p) { return ids.indexOf(p.id) !== -1; });
       if (!sel.length) return null;

@@ -428,7 +428,7 @@
     const api = window._RW && window._RW.geophotos;
     const m = new Map();
     if (api && api.list) api.list().forEach((p) => {
-      const k = p.rip_route || p.rip_lot;
+      const k = (p.rip_lot && p.rip_lot_inside) ? p.rip_lot : (p.rip_route || p.rip_lot);
       if (k) m.set(k, (m.get(k) || 0) + 1);
     });
     return m;
@@ -745,17 +745,18 @@
     const photos = api.list();
     if (!photos.length) return { html: '<div style="padding:40px;text-align:center;color:#8a949f">No field photos yet. Import photos, then use <b>Tag photos to routes</b> in the Photo Triage module.</div>' };
 
-    // group: route ident → photos; lot-only → "lot:IDENT"; else Unassigned
-    const groups = new Map();      // key → { title, kind, photos:[] }
-    const keyFor = (p) => p.rip_route ? p.rip_route : (p.rip_lot ? 'lot:' + p.rip_lot : '__un__');
+    // group by the PRIMARY feature: being inside a lot wins over proximity to a
+    // road; otherwise road wins; otherwise a nearby lot; else Unassigned.
+    const groups = new Map();      // key → { title, kind, ident, photos:[] }
     photos.forEach((p) => {
-      const k = keyFor(p);
+      const insideLot = p.rip_lot && p.rip_lot_inside;
+      const k = insideLot ? ('lot:' + p.rip_lot) : (p.rip_route ? p.rip_route : (p.rip_lot ? 'lot:' + p.rip_lot : '__un__'));
       if (!groups.has(k)) {
-        let title;
-        if (p.rip_route) title = p.rip_route + (p.rip_route_name ? ' · ' + p.rip_route_name : '');
-        else if (p.rip_lot) title = '🅿 ' + p.rip_lot + (p.rip_lot_name ? ' · ' + p.rip_lot_name : '');
-        else title = 'Unassigned (not tagged to a route)';
-        groups.set(k, { title, kind: p.rip_route ? 'route' : (p.rip_lot ? 'lot' : 'un'), ident: (p.rip_route || p.rip_lot || ''), photos: [] });
+        let title, kind, ident;
+        if (insideLot || (!p.rip_route && p.rip_lot)) { title = '🅿 ' + p.rip_lot + (p.rip_lot_name ? ' · ' + p.rip_lot_name : ''); kind = 'lot'; ident = p.rip_lot; }
+        else if (p.rip_route) { title = p.rip_route + (p.rip_route_name ? ' · ' + p.rip_route_name : ''); kind = 'route'; ident = p.rip_route; }
+        else { title = 'Unassigned (not tagged to a route or lot)'; kind = 'un'; ident = ''; }
+        groups.set(k, { title, kind, ident, photos: [] });
       }
       groups.get(k).photos.push(p);
     });
@@ -813,39 +814,87 @@
   }
 
   function _flashBtn(btn, txt) { if (!btn) return; const o = btn.textContent; btn.textContent = txt; setTimeout(() => { btn.textContent = o; }, 1100); }
-  // Copy a photo's image to the clipboard (PNG via canvas for broad support).
-  function copyPhoto(id, btn) {
-    resolvePhotoImg(id).then((src) => {
-      if (!src) { _flashBtn(btn, '∅'); return; }
-      if (!(navigator.clipboard && window.ClipboardItem)) { _flashBtn(btn, '✕'); return; }
-      const im = new Image();
-      im.onload = () => {
-        try {
+  // Export watermark is automatic (applied on save/copy/print); the global
+  // toggle lets it be turned off. Stored/displayed images stay clean.
+  function exportWmOn() { try { return localStorage.getItem('rw_export_watermark') !== '0'; } catch (e) { return true; } }
+
+  // Draw the standard watermark (same lines as the PDF report) onto a canvas.
+  function drawWatermark(ctx, W, H, lines) {
+    const base = Math.max(12, Math.round(W / 95));
+    const pad = Math.round(base * 0.7), lh = Math.round(base * 1.42);
+    const fontFor = (i) => (i === 0 ? '700 ' + Math.round(base * 1.12) : '600 ' + base) + 'px "IBM Plex Mono", ui-monospace, monospace';
+    let maxW = 0;
+    lines.forEach((l, i) => { ctx.font = fontFor(i); maxW = Math.max(maxW, ctx.measureText(l).width); });
+    const boxW = Math.min(W, maxW + pad * 2);
+    const boxH = lines.length * lh + pad * 2 - (lh - base);
+    const y = H - boxH;
+    ctx.fillStyle = 'rgba(17,17,17,0.6)'; ctx.fillRect(0, y, boxW, boxH);
+    ctx.textBaseline = 'top'; ctx.fillStyle = '#fff';
+    let ty = y + pad;
+    lines.forEach((l, i) => { ctx.font = fontFor(i); ctx.fillText(l, pad, ty); ty += lh; });
+  }
+
+  // Resolve a photo to a canvas with the watermark burned in (when enabled).
+  function watermarkCanvas(id) {
+    return resolvePhotoImg(id).then((src) => {
+      if (!src) return null;
+      return new Promise((res) => {
+        const im = new Image();
+        im.onload = () => {
           const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight;
-          c.getContext('2d').drawImage(im, 0, 0);
-          c.toBlob((blob) => {
-            if (!blob) { _flashBtn(btn, '✕'); return; }
-            navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(() => _flashBtn(btn, '✓'), () => _flashBtn(btn, '✕'));
-          }, 'image/png');
-        } catch (e) { _flashBtn(btn, '✕'); }
-      };
-      im.onerror = () => _flashBtn(btn, '✕');
-      im.src = src;
+          const ctx = c.getContext('2d'); ctx.drawImage(im, 0, 0);
+          if (exportWmOn()) {
+            const p = Object.assign({}, (window._RW && window._RW.geophotos && window._RW.geophotos.get(id)) || {});
+            if (window.RW2PhotoTag && window.RW2PhotoTag.station && p.rip_route && (p.rip_route_mp == null || p.rip_route_sta == null) && isFinite(Number(p.lat)) && isFinite(Number(p.lng))) {
+              try { const st = window.RW2PhotoTag.station(Number(p.lat), Number(p.lng), p.rip_route); if (st) { p.rip_route_sta = st.sta; p.rip_route_mp = st.mp; } } catch (e) {}
+            }
+            const lines = (window.RW2PhotoReport && window.RW2PhotoReport.watermarkLines) ? window.RW2PhotoReport.watermarkLines(p) : [];
+            if (lines.length) drawWatermark(ctx, c.width, c.height, lines);
+          }
+          res(c);
+        };
+        im.onerror = () => res(null);
+        im.src = src;
+      });
     });
   }
-  // Download a photo's image file.
+
+  // Copy the (watermarked) image to the clipboard.
+  function copyPhoto(id, btn) {
+    if (!(navigator.clipboard && window.ClipboardItem)) { _flashBtn(btn, '✕'); return; }
+    watermarkCanvas(id).then((c) => {
+      if (!c) { _flashBtn(btn, '∅'); return; }
+      c.toBlob((blob) => {
+        if (!blob) { _flashBtn(btn, '✕'); return; }
+        navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(() => _flashBtn(btn, '✓'), () => _flashBtn(btn, '✕'));
+      }, 'image/png');
+    });
+  }
+  // Download the (watermarked) image file.
   function savePhoto(id) {
     const api = window._RW && window._RW.geophotos; const p = api && api.get && api.get(id);
-    resolvePhotoImg(id).then((src) => {
-      if (!src) return;
-      const nm = (p && p._name && /\.(jpe?g|png|gif|webp)$/i.test(p._name)) ? p._name : ('photo-' + id + '.jpg');
-      const a = document.createElement('a'); a.href = src; a.download = nm;
+    watermarkCanvas(id).then((c) => {
+      if (!c) return;
+      const nm = (p && p._name ? String(p._name).replace(/\.(jpe?g|png|gif|webp)$/i, '') : ('photo-' + id)) + '.jpg';
+      const a = document.createElement('a'); a.href = c.toDataURL('image/jpeg', 0.92); a.download = nm;
       document.body.appendChild(a); a.click(); a.remove();
     });
   }
 
-  // Full-screen lightbox: view the stored image large, open in a tab, or save.
-  let _lbSrc = null;
+  // Switch to the map, fly to a photo, and flash its marker so it's findable.
+  function flyToPhoto(p) {
+    if (!p) return;
+    if (RW().openMap) RW().openMap(); else if (window.showModule) window.showModule('map');
+    setTimeout(() => {
+      const m = window._RW && window._RW.state && window._RW.state.map;
+      if (m && isFinite(p.lat) && isFinite(p.lng)) m.setView([p.lat, p.lng], Math.max(m.getZoom() || 0, 18));
+      if (window._RW && window._RW.geophotos && window._RW.geophotos.highlight) setTimeout(() => window._RW.geophotos.highlight(p.id), 350);
+    }, 250);
+  }
+
+  // Full-screen lightbox: view the clean image large, open in a tab, or save
+  // (tab + save are watermarked; the in-lightbox view stays clean).
+  let _lbSrc = null, _lbId = null;
   function openLightbox(id) {
     const api = window._RW && window._RW.geophotos;
     const p = api && api.get && api.get(id); if (!p) return;
@@ -869,8 +918,13 @@
       ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
       document.getElementById('riplb-close').onclick = close;
       document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ov.style.display !== 'none') close(); });
-      document.getElementById('riplb-tab').onclick = () => { if (_lbSrc) { const w = window.open(''); if (w) w.document.write('<title>Photo</title><img src="' + _lbSrc + '" style="max-width:100%">'); } };
+      document.getElementById('riplb-tab').onclick = () => {
+        if (!_lbId) return;
+        watermarkCanvas(_lbId).then((c) => { const src = c ? c.toDataURL('image/jpeg', 0.92) : _lbSrc; if (!src) return; const w = window.open(''); if (w) w.document.write('<title>Photo</title><img src="' + src + '" style="max-width:100%">'); });
+      };
+      document.getElementById('riplb-dl').onclick = (e) => { e.preventDefault(); if (_lbId) savePhoto(_lbId); };
     }
+    _lbId = id;
     // title + meta
     const title = p.rip_route ? (p.rip_route + (p.rip_route_name ? ' · ' + p.rip_route_name : '')) : (p._name || 'Field photo');
     document.getElementById('riplb-title').textContent = title;
@@ -885,21 +939,14 @@
     if (p.description) bits.push('“' + p.description + '”');
     document.getElementById('riplb-meta').innerHTML = bits.map((b) => esc(b)).join('<br>');
     // map jump
-    document.getElementById('riplb-map').onclick = () => {
-      ov.style.display = 'none';
-      if (RW().openMap) RW().openMap(); else if (window.showModule) window.showModule('map');
-      setTimeout(() => { const m = window._RW && window._RW.state && window._RW.state.map; if (m && isFinite(p.lat) && isFinite(p.lng)) m.setView([p.lat, p.lng], Math.max(m.getZoom() || 0, 18)); }, 250);
-    };
+    document.getElementById('riplb-map').onclick = () => { ov.style.display = 'none'; flyToPhoto(p); };
     // image (restores offloaded sets)
     const imgEl = document.getElementById('riplb-img');
-    const dl = document.getElementById('riplb-dl');
     imgEl.src = ''; _lbSrc = null;
-    document.getElementById('riplb-meta').insertAdjacentHTML('beforeend', '');
     ov.style.display = 'flex';
     resolvePhotoImg(id).then((src) => {
       if (!src) { imgEl.alt = 'Image offloaded — turn its photo set back on to view.'; return; }
-      _lbSrc = src; imgEl.src = src;
-      dl.href = src; dl.download = (p._name || ('photo-' + p.id)) + (/\.(jpe?g|png|gif|webp)$/i.test(p._name || '') ? '' : '.jpg');
+      _lbSrc = src; imgEl.src = src;   // clean view; Save/Open-in-tab watermark it
     });
   }
 
@@ -1195,8 +1242,7 @@
     host.querySelectorAll('[data-rip-fly]').forEach((b) => b.onclick = (e) => {
       e.stopPropagation();
       const p = photoGet(b.getAttribute('data-rip-fly')); if (!p) return;
-      if (RW().openMap) RW().openMap(); else if (window.showModule) window.showModule('map');
-      setTimeout(() => { const m = window._RW && window._RW.state && window._RW.state.map; if (m && isFinite(p.lat) && isFinite(p.lng)) m.setView([p.lat, p.lng], Math.max(m.getZoom() || 0, 18)); }, 250);
+      flyToPhoto(p);
     });
     // Photos tab — heart toggle (updates in place, no full re-render).
     host.querySelectorAll('[data-rip-heart]').forEach((btn) => btn.onclick = (e) => {

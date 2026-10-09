@@ -57,7 +57,8 @@
     var sel = $('prv-select'); if (!sel) return;
     var g = geo(); var counts = {}, lots = {}, untagged = 0, nameOf = {}, lotName = {};
     (g ? g.list() : []).forEach(function (p) {
-      if (p.rip_route) { counts[p.rip_route] = (counts[p.rip_route] || 0) + 1; if (!nameOf[p.rip_route]) nameOf[p.rip_route] = p.rip_route_name || ''; }
+      var insideLot = p.rip_lot && p.rip_lot_inside;   // inside a lot wins over road proximity
+      if (!insideLot && p.rip_route) { counts[p.rip_route] = (counts[p.rip_route] || 0) + 1; if (!nameOf[p.rip_route]) nameOf[p.rip_route] = p.rip_route_name || ''; }
       else if (p.rip_lot) { lots[p.rip_lot] = (lots[p.rip_lot] || 0) + 1; if (!lotName[p.rip_lot]) lotName[p.rip_lot] = p.rip_lot_name || ''; }
       else untagged++;
     });

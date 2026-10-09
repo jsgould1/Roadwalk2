@@ -28,10 +28,17 @@
   var _parkName = '';
 
   // ---- data ------------------------------------------------------------------
-  function sectionKey(p) { return p.rip_route || UNASSIGNED; }
+  function sectionKey(p) {
+    if (p.rip_lot && p.rip_lot_inside) return 'lot:' + p.rip_lot;   // inside a lot wins
+    if (p.rip_route) return p.rip_route;
+    if (p.rip_lot) return 'lot:' + p.rip_lot;
+    return UNASSIGNED;
+  }
   function sectionTitle(p) {
-    if (!p.rip_route) return 'Unassigned (no route tag)';
-    return p.rip_route + (p.rip_route_name ? ' — ' + p.rip_route_name : '');
+    if (p.rip_lot && p.rip_lot_inside) return '🅿 ' + p.rip_lot + (p.rip_lot_name ? ' — ' + p.rip_lot_name : '');
+    if (p.rip_route) return p.rip_route + (p.rip_route_name ? ' — ' + p.rip_route_name : '');
+    if (p.rip_lot) return '🅿 ' + p.rip_lot + (p.rip_lot_name ? ' — ' + p.rip_lot_name : '');
+    return 'Unassigned (no route/lot tag)';
   }
   // → [{key,title,photos:[...]}], sorted by route ident, Unassigned last
   function grouped(heartedOnly) {
@@ -290,12 +297,15 @@
       $('pr-close').addEventListener('click', closeOverlay);
       $('pr-go').addEventListener('click', generate);
       $('pr-hearted').addEventListener('change', renderBuilder);
+      $('pr-wm').addEventListener('change', function () { try { localStorage.setItem('rw_export_watermark', $('pr-wm').checked ? '1' : '0'); } catch (e) {} });
       // prefill park name from the loaded bundle, upgrade to full name if indexed
       var code = (rip() && rip().state && rip().state.bundle && rip().state.bundle.park) || '';
       $('pr-park').value = _parkName || code;
       if (code) tryParkName(code).then(function (nm) { if (nm && !$('pr-park').value) $('pr-park').value = nm; else if (nm && $('pr-park').value === code) $('pr-park').value = nm; _parkName = $('pr-park').value; });
     }
     ov.classList.add('on');
+    // Reflect the global export-watermark setting (save/copy/print share it).
+    var pw = $('pr-wm'); if (pw) { try { pw.checked = localStorage.getItem('rw_export_watermark') !== '0'; } catch (e) {} }
     // Warm the route geometry so STA/MP are ready when Generate is clicked.
     if (window.RW2PhotoTag && window.RW2PhotoTag.ensureGeo) { try { window.RW2PhotoTag.ensureGeo(); } catch (e) {} }
     // Auto-fill the Park field from the loaded park each time it opens (if empty).
@@ -337,5 +347,5 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', whenReady);
   else whenReady();
 
-  window.RW2PhotoReport = { open: openOverlay, generate: generate, grouped: grouped, layoutFor: layoutFor };
+  window.RW2PhotoReport = { open: openOverlay, generate: generate, grouped: grouped, layoutFor: layoutFor, watermarkLines: watermarkLines, fmtSta: fmtSta };
 })();
