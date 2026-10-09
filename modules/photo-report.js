@@ -96,22 +96,28 @@
       }); });
     }
 
-    // resolve every image (incl. offloaded) up front
+    // resolve every image (incl. offloaded) + the AECOM logo up front
     var ids = []; secs.forEach(function (s) { s.photos.forEach(function (p) { ids.push(p.id); }); });
-    Promise.all(ids.map(function (id) { return imageFor(id).then(function (d) { return { id: id, d: d }; }); }))
-      .then(function (res) {
+    Promise.all([
+      fetchBlackLogo(),
+      Promise.all(ids.map(function (id) { return imageFor(id).then(function (d) { return { id: id, d: d }; }); })),
+    ]).then(function (all) {
+        var blackLogo = all[0], res = all[1];
         var img = {}; var missing = 0;
         res.forEach(function (r) { if (r.d) img[r.id] = r.d; else missing++; });
         var park = ($('pr-park') && $('pr-park').value) || _parkName || (rip() && rip().state && rip().state.bundle && rip().state.bundle.park) || '';
         var wmOn = !$('pr-wm') || $('pr-wm').checked;
-        var logo = (document.querySelector('.aecom-logo') || {}).src || '';
+        // Prefer the official black AECOM logo (data/aecom-logo-black.png); fall
+        // back to the app's reverse logo, darkened.
+        var logo = blackLogo || (document.querySelector('.aecom-logo') || {}).src || '';
+        var logoBlack = !!blackLogo;
         var pagesHtml = '';
         secs.forEach(function (s) {
           var usable = s.photos.filter(function (p) { return img[p.id]; });
           var pages = chunk6(usable);
           var routeId = (s.key === UNASSIGNED) ? 'Unassigned' : (s.key.indexOf('lot:') === 0 ? s.key.slice(4) : s.key);
           pages.forEach(function (pagePhotos, pi) {
-            pagesHtml += pageHtml({ park: park, logo: logo, secTitle: s.title, routeId: routeId,
+            pagesHtml += pageHtml({ park: park, logo: logo, logoBlack: logoBlack, secTitle: s.title, routeId: routeId,
               pageIdx: pi + 1, pageCount: pages.length, photos: pagePhotos, img: img, wmOn: wmOn });
           });
         });
@@ -126,6 +132,17 @@
   // 16-point compass heading: 110° → "ESE".
   var _CARD16 = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
   function cardinal(deg) { return _CARD16[Math.round((((+deg % 360) + 360) % 360) / 22.5) % 16]; }
+
+  // Load the official black AECOM logo as a data URI (cached once).
+  var _blackLogo;
+  function fetchBlackLogo() {
+    if (_blackLogo !== undefined) return Promise.resolve(_blackLogo);
+    return fetch('aecom-logo-black.png', { cache: 'force-cache' })
+      .then(function (r) { if (!r.ok) throw 0; return r.blob(); })
+      .then(function (b) { return new Promise(function (res) { var fr = new FileReader(); fr.onload = function () { res(fr.result); }; fr.onerror = function () { res(null); }; fr.readAsDataURL(b); }); })
+      .then(function (d) { _blackLogo = d || null; return _blackLogo; })
+      .catch(function () { _blackLogo = null; return null; });
+  }
 
   // Watermark content as ordered lines (top row = route + FMSS, then STA/MP,
   // then GPS + bearing, then capture date/time).
@@ -175,7 +192,7 @@
         '<div class="imgbox"><img src="' + o.img[p.id] + '">' + wmHtml + '</div>' +
         (cap ? '<div class="cap">' + esc(cap) + '</div>' : '') + '</div>';
     }).join('');
-    var logoHtml = o.logo ? '<img class="hdr-logo" src="' + o.logo + '" alt="AECOM">' : '<span class="hdr-aecom">AECOM</span>';
+    var logoHtml = o.logo ? '<img class="hdr-logo' + (o.logoBlack ? ' blk' : '') + '" src="' + o.logo + '" alt="AECOM">' : '<span class="hdr-aecom">AECOM</span>';
     return '<section class="page" style="--rows:' + lay.rows + '">' +
       '<div class="phdr">' + logoHtml +
       '<span class="pk">' + esc(o.park) + '</span>' +
@@ -192,11 +209,14 @@
       '@page{size:letter portrait;margin:0.45in}' +
       '*{box-sizing:border-box}' +
       'html,body{margin:0;padding:0;font-family:"IBM Plex Sans",system-ui,sans-serif;color:#1A1D22}' +
-      '.page{height:10.1in;display:flex;flex-direction:column;page-break-after:always}' +
-      '.page:last-child{page-break-after:auto}' +
+      // Fixed page box, clipped so nothing can spill onto (and overlap) the next
+      // printed page; small height buffer keeps a section to exactly one sheet.
+      '.page{height:9.9in;display:flex;flex-direction:column;overflow:hidden;page-break-after:always;break-after:page;break-inside:avoid;page-break-inside:avoid}' +
+      '.page:last-child{page-break-after:auto;break-after:auto}' +
       // header: AECOM logo (top-left) + park + section, clean rule
       '.phdr{display:flex;align-items:center;gap:12px;border-bottom:2px solid #0B3D66;padding-bottom:6px;margin-bottom:9px;flex:0 0 auto}' +
-      '.phdr .hdr-logo{height:20px;width:auto;object-fit:contain;filter:brightness(0)}' +
+      '.phdr .hdr-logo{height:24px;width:auto;object-fit:contain}' +
+      '.phdr .hdr-logo:not(.blk){filter:brightness(0)}' +
       '.phdr .hdr-aecom{font:800 14px "IBM Plex Sans",system-ui;color:#12233b;letter-spacing:1px}' +
       '.phdr .pk{font-weight:800;font-size:15px;color:#12233b;letter-spacing:.2px}' +
       '.phdr .sc{font-weight:600;font-size:12px;color:#5b6673;flex:1 1 auto;text-align:right}' +

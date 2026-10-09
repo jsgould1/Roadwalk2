@@ -120,7 +120,7 @@
 <script src="modules/photo-sets.js?v=5" defer></script>
 <script src="modules/photo-autotag.js?v=3" defer></script>
 <script src="modules/photo-route-view.js?v=4" defer></script>
-<script src="modules/photo-report.js?v=9" defer></script>
+<script src="modules/photo-report.js?v=11" defer></script>
 <script src="modules/photo-dashboard.js?v=3" defer></script>
 
 <style>
@@ -37543,6 +37543,36 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   var _CARD16 = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
   function _cardinal(deg) { return _CARD16[Math.round((((+deg % 360) + 360) % 360) / 22.5) % 16]; }
 
+  // In-app full-screen image overlay (click anywhere or ESC to close) — replaces
+  // opening the photo in a new browser tab. Shows the full-size original if kept.
+  var _gpOvUrl = null;
+  function _closeImgOverlay() {
+    var ov = document.getElementById('gp-img-overlay');
+    if (ov) { ov.style.display = 'none'; var im = ov.querySelector('img'); if (im) im.src = ''; }
+    if (_gpOvUrl) { try { URL.revokeObjectURL(_gpOvUrl); } catch (e) {} _gpOvUrl = null; }
+  }
+  function _openImageOverlay(p) {
+    var ov = document.getElementById('gp-img-overlay');
+    if (!ov) {
+      ov = document.createElement('div');
+      ov.id = 'gp-img-overlay';
+      ov.style.cssText = 'position:fixed;inset:0;z-index:5000;background:rgba(10,12,16,0.92);display:none;align-items:center;justify-content:center;cursor:zoom-out';
+      ov.innerHTML = '<img alt="" style="max-width:96vw;max-height:94vh;object-fit:contain;border-radius:4px;box-shadow:0 10px 40px rgba(0,0,0,0.5)">';
+      document.body.appendChild(ov);
+      ov.addEventListener('click', _closeImgOverlay);
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape') _closeImgOverlay(); });
+    }
+    if (_gpOvUrl) { try { URL.revokeObjectURL(_gpOvUrl); } catch (e) {} _gpOvUrl = null; }
+    var imgEl = ov.querySelector('img');
+    imgEl.src = _imgSrc(p);          // instant: downscaled display (or placeholder)
+    ov.style.display = 'flex';
+    if (window._RW && window._RW.geophotos && window._RW.geophotos.original) {
+      window._RW.geophotos.original(p.id).then(function (blob) {   // upgrade to full-size original
+        if (blob && ov.style.display !== 'none') { _gpOvUrl = URL.createObjectURL(blob); imgEl.src = _gpOvUrl; }
+      });
+    }
+  }
+
   function tipFor(p) {
     var parts = [];
     parts.push('<img src="' + _imgSrc(p) + '" alt="">');
@@ -37695,12 +37725,9 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     var img = document.createElement('img');
     img.className = 'gp-pop-img';
     img.src = _imgSrc(p);
-    img.title = p.dataUrl ? 'Open full size' : 'Image offloaded — turn its photo set back on';
-    img.addEventListener('click', function () {
-      if (!p.dataUrl) return;
-      var w = window.open('', '_blank');
-      if (w) w.document.write('<img src="' + p.dataUrl + '" style="max-width:100%">');
-    });
+    img.title = p.dataUrl ? 'Click to view full size' : 'Image offloaded — turn its photo set back on';
+    img.style.cursor = 'zoom-in';
+    img.addEventListener('click', function () { _openImageOverlay(p); });
     var meta = document.createElement('div');
     meta.className = 'gp-pop-meta';
     meta.textContent = p.lat.toFixed(6) + ', ' + p.lng.toFixed(6) +
