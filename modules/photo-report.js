@@ -205,12 +205,16 @@
       var full = lay.fulls[i] ? ' full' : '';
       var cap = (p.description || '').trim();
       var wmLines = o.wmOn ? watermarkLines(p) : [];
-      var wmHtml = wmLines.length ? '<div class="wm">' + wmLines.map(function (l, li) {
+      var metaHtml = wmLines.map(function (l, li) {
         return '<div' + (li === 0 ? ' class="wm0"' : '') + '>' + esc(l) + '</div>';
-      }).join('') + '</div>' : '';
+      }).join('');
+      // info bar: metadata left, typed description right (wraps)
+      var wmHtml = (metaHtml || cap)
+        ? '<div class="wm"><div class="wm-l">' + metaHtml + '</div>' +
+          (cap ? '<div class="wm-r">' + esc(cap) + '</div>' : '') + '</div>'
+        : '';
       return '<div class="cell' + full + '">' +
-        '<div class="imgbox"><img src="' + o.img[p.id] + '">' + wmHtml + '</div>' +
-        (cap ? '<div class="cap">' + esc(cap) + '</div>' : '') + '</div>';
+        '<div class="imgbox"><img src="' + o.img[p.id] + '">' + wmHtml + '</div></div>';
     }).join('');
     var npsHtml = o.npsLogo ? '<img class="nps-logo" src="' + o.npsLogo + '" alt="NPS">' : '';
     var aecomHtml = o.aecomLogo ? '<img class="ftr-logo' + (o.aecomBlack ? ' blk' : '') + '" src="' + o.aecomLogo + '" alt="AECOM">' : '<span class="ftr-aecom">AECOM</span>';
@@ -249,10 +253,11 @@
       '.imgbox{position:relative;flex:1 1 auto;min-height:0;overflow:hidden;border:0.75pt solid #9aa3ad;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
       '.imgbox img{width:100%;height:100%;object-fit:cover;display:block}' +
       // solid info bar across the bottom of the image
-      '.wm{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,0.68);color:#fff;font:600 8px "IBM Plex Mono",monospace;letter-spacing:.2px;padding:4px 8px 5px;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
-      '.wm div{line-height:1.45;white-space:pre}' +
-      '.wm .wm0{font-weight:800;font-size:9.5px;letter-spacing:.4px}' +
-      '.cap{flex:0 0 auto;font-size:10px;line-height:1.3;color:#1A1D22;padding:3px 2px 0;min-height:12px}' +
+      '.wm{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,0.68);color:#fff;font:600 8px "IBM Plex Mono",monospace;letter-spacing:.2px;padding:4px 8px 5px;display:flex;justify-content:space-between;align-items:flex-end;gap:10px;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
+      '.wm-l{flex:1 1 auto;min-width:0}' +
+      '.wm-l div{line-height:1.45;white-space:pre}' +
+      '.wm-l .wm0{font-weight:800;font-size:9.5px;letter-spacing:.4px}' +
+      '.wm-r{flex:0 1 auto;max-width:48%;text-align:right;align-self:flex-end;font:italic 600 8px "IBM Plex Sans",system-ui;letter-spacing:.1px;line-height:1.32;white-space:normal;overflow-wrap:anywhere}' +
       // footer: AECOM logo (bottom-left) + Route ID over Page N of X (bottom-right)
       '.pftr{flex:0 0 auto;display:flex;justify-content:space-between;align-items:flex-end;border-top:1pt solid #c7ccd2;margin-top:8px;padding-top:6px}' +
       '.pftr .ftr-logo{height:16px;width:auto;object-fit:contain}' +
