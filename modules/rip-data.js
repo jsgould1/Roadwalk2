@@ -834,12 +834,24 @@
     lines.forEach((l, i) => { ctx.font = fontFor(i); ctx.fillText(l, pad, ty); ty += lh; });
   }
 
-  // Resolve a photo to a canvas with the watermark burned in (when enabled).
+  // Best source for EXPORT: the full-size original if stored, else the
+  // downscaled display image. Returns { url, revoke } or null.
+  function exportSrc(id) {
+    const api = window._RW && window._RW.geophotos;
+    const fallback = () => resolvePhotoImg(id).then((s) => s ? { url: s, revoke: false } : null);
+    if (api && api.original) {
+      return api.original(id).then((blob) => blob ? { url: URL.createObjectURL(blob), revoke: true } : fallback());
+    }
+    return fallback();
+  }
+
+  // Resolve a photo to a canvas at FULL resolution with the watermark burned in.
   function watermarkCanvas(id) {
-    return resolvePhotoImg(id).then((src) => {
-      if (!src) return null;
+    return exportSrc(id).then((srcObj) => {
+      if (!srcObj) return null;
       return new Promise((res) => {
         const im = new Image();
+        const done = (c) => { if (srcObj.revoke) { try { URL.revokeObjectURL(srcObj.url); } catch (e) {} } res(c); };
         im.onload = () => {
           const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight;
           const ctx = c.getContext('2d'); ctx.drawImage(im, 0, 0);
@@ -851,10 +863,10 @@
             const lines = (window.RW2PhotoReport && window.RW2PhotoReport.watermarkLines) ? window.RW2PhotoReport.watermarkLines(p) : [];
             if (lines.length) drawWatermark(ctx, c.width, c.height, lines);
           }
-          res(c);
+          done(c);
         };
-        im.onerror = () => res(null);
-        im.src = src;
+        im.onerror = () => done(null);
+        im.src = srcObj.url;
       });
     });
   }
@@ -920,7 +932,11 @@
       document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ov.style.display !== 'none') close(); });
       document.getElementById('riplb-tab').onclick = () => {
         if (!_lbId) return;
-        watermarkCanvas(_lbId).then((c) => { const src = c ? c.toDataURL('image/jpeg', 0.92) : _lbSrc; if (!src) return; const w = window.open(''); if (w) w.document.write('<title>Photo</title><img src="' + src + '" style="max-width:100%">'); });
+        const api = window._RW && window._RW.geophotos;   // open the actual full-size original (clean)
+        (api && api.original ? api.original(_lbId) : Promise.resolve(null)).then((blob) => {
+          const url = blob ? URL.createObjectURL(blob) : _lbSrc;
+          if (url) window.open(url, '_blank');
+        });
       };
       document.getElementById('riplb-dl').onclick = (e) => { e.preventDefault(); if (_lbId) savePhoto(_lbId); };
     }

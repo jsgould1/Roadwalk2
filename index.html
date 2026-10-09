@@ -101,7 +101,7 @@
 <script src="modules/library.js" defer></script>
 <script src="modules/route-tools.js" defer></script>
 <script src="modules/aecom-toggle.js?v=2" defer></script>
-<script src="modules/rip-data.js?v=17" defer></script>
+<script src="modules/rip-data.js?v=18" defer></script>
 <script src="modules/rip-import.js?v=2" defer></script>
 <script src="modules/rip-map.js?v=14" defer></script>
 <script src="modules/rip-pathweb.js?v=2" defer></script>
@@ -9566,9 +9566,17 @@ body.mobile-mode #app {
                 <span class="rw-dropzone-ico">⬇</span>
                 <span class="rw-dropzone-lbl">…or drop photos here</span>
               </div>
-              <!-- Photos are stored at full resolution (RAM is managed by photo
-                   sets / offload). The watermark is applied automatically on
-                   save / copy / print — toggle it in the Photo report. -->
+              <!-- Display images are downscaled to this size (keeps the viewer
+                   fast); the full original is kept for save / copy / open. The
+                   watermark is applied automatically on save / copy / print. -->
+              <label class="pp-opt"><span>Display size</span>
+                <select id="pp-size">
+                  <option value="800">Small · 800 px</option>
+                  <option value="1200">Medium · 1200 px</option>
+                  <option value="1600" selected>Large · 1600 px</option>
+                  <option value="2400">X-Large · 2400 px</option>
+                </select>
+              </label>
               <label class="pp-show"><input type="checkbox" id="pp-show" checked> Show markers on map</label>
               <div class="pp-count" id="pp-count">No photos yet.</div>
               <div class="pp-hint">Photos with GPS data drop at their location; others
@@ -37185,18 +37193,44 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
   }
 
   /* ===================== GEO-PHOTOS — storage ===================== */
-  var DB_NAME = 'RoadWalk2GeoPhotos_v1', DB_STORE = 'geophotos';
+  var DB_NAME = 'RoadWalk2GeoPhotos_v1', DB_STORE = 'geophotos', ORIG_STORE = 'originals';
   function openDB() {
     return new Promise(function (res, rej) {
-      var rq = indexedDB.open(DB_NAME, 1);
+      var rq = indexedDB.open(DB_NAME, 2);
       rq.onupgradeneeded = function (e) {
         var db = e.target.result;
-        if (!db.objectStoreNames.contains(DB_STORE)) {
-          db.createObjectStore(DB_STORE, { keyPath: 'id' });
-        }
+        if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE, { keyPath: 'id' });
+        // Full-size originals live here — never loaded into RAM; read on demand
+        // only when saving / copying / opening a photo at full resolution.
+        if (!db.objectStoreNames.contains(ORIG_STORE)) db.createObjectStore(ORIG_STORE, { keyPath: 'id' });
       };
       rq.onsuccess = function (e) { res(e.target.result); };
       rq.onerror   = function (e) { rej(e.target.error); };
+    });
+  }
+  function origPut(id, blob, name, type) {
+    return openDB().then(function (db) {
+      return new Promise(function (res, rej) {
+        var tx = db.transaction(ORIG_STORE, 'readwrite');
+        tx.objectStore(ORIG_STORE).put({ id: id, blob: blob, name: name || null, type: type || (blob && blob.type) || 'image/jpeg' });
+        tx.oncomplete = function () { res(); }; tx.onerror = function () { rej(tx.error); };
+      });
+    });
+  }
+  function origGet(id) {
+    return openDB().then(function (db) {
+      return new Promise(function (res) {
+        try { var rq = db.transaction(ORIG_STORE, 'readonly').objectStore(ORIG_STORE).get(id); rq.onsuccess = function () { res(rq.result || null); }; rq.onerror = function () { res(null); }; }
+        catch (e) { res(null); }
+      });
+    });
+  }
+  function origDel(id) {
+    return openDB().then(function (db) {
+      return new Promise(function (res) {
+        try { var tx = db.transaction(ORIG_STORE, 'readwrite'); tx.objectStore(ORIG_STORE).delete(id); tx.oncomplete = function () { res(); }; tx.onerror = function () { res(); }; }
+        catch (e) { res(); }
+      });
     });
   }
   function dbAll() {
@@ -37360,7 +37394,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         ctx.drawImage(bmp, 0, 0, cw, ch);
         if (bmp.close) bmp.close();
         if (wm) { try { drawWatermark(ctx, cw, ch, wm); } catch (e) {} }
-        return cv.toDataURL('image/jpeg', 0.9);
+        return cv.toDataURL('image/jpeg', 0.82);
       });
     }
     return new Promise(function (res, rej) {
@@ -37964,8 +37998,10 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     var center = (map && map.getCenter) ? map.getCenter() : { lat: 0, lng: 0 };
     var countEl = $('pp-count');
     // Resize + watermark options (from the photos panel).
-    // Store at full resolution — RAM is managed by photo sets / offload now.
-    var maxSize = 100000;
+    // Downscale for the in-RAM display image (keeps the viewer fast). The full
+    // original is stored separately (originals store) for save / copy / open.
+    var sizeEl = $('pp-size');
+    var maxSize = sizeEl ? (parseInt(sizeEl.value, 10) || 1600) : 1600;
     var added = 0, noGpsIdx = 0, total = arr.length, done = 0;
     if (countEl) countEl.textContent = 'Importing 0 / ' + total + '…';
     var seq = Promise.resolve();
@@ -38000,10 +38036,11 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
               // Photo set this image belongs to (folder name), for RAM on/off.
               _set: setName || null,
               _name: (file && file.name) || null,
+              _hasOrig: true,   // a full-size original is kept in the originals store
             };
             PHOTOS.push(rec);
             added++;
-            return dbPut(rec);
+            return dbPut(rec).then(function () { return origPut(rec.id, file, file.name, file.type); });
           });
         }).catch(function (e) { console.warn('[RoadWalk] photo import failed:', e); })
           .then(function () {
@@ -38116,12 +38153,14 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     saveMany:    function (ps) { return Promise.all((ps || []).map(dbPut)); },
     // Import image files into a named photo set (folder). Returns Promise<n>.
     importFiles: function (files, setName) { return handleFiles(files, setName); },
-    // Remove a photo entirely (from RAM + IDB). Returns Promise.
+    // Remove a photo entirely (from RAM + IDB, incl. its full-size original).
     remove:      function (id) {
       var i = PHOTOS.findIndex(function (p) { return p.id === id; });
       if (i !== -1) PHOTOS.splice(i, 1);
-      return dbDel(id);
+      return dbDel(id).then(function () { return origDel(id); });
     },
+    // The full-size original image Blob (read on demand; null if none stored).
+    original:    function (id) { return origGet(id).then(function (r) { return r ? r.blob : null; }); },
     newGroupId:  _newGroupId,
     groupColor:  _groupColor,
     members:     _groupMembers,
