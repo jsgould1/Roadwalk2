@@ -882,7 +882,7 @@
       }, 'image/png');
     });
   }
-  // Download the (watermarked) image file.
+  // Download the (watermarked, full-size) image file.
   function savePhoto(id) {
     const api = window._RW && window._RW.geophotos; const p = api && api.get && api.get(id);
     watermarkCanvas(id).then((c) => {
@@ -892,6 +892,8 @@
       document.body.appendChild(a); a.click(); a.remove();
     });
   }
+  // Shared so the map popup (a different module) can offer Save / Copy too.
+  window.RW2PhotoExport = { save: savePhoto, copy: copyPhoto };
 
   // Switch to the map, fly to a photo, and flash its marker so it's findable.
   function flyToPhoto(p) {
