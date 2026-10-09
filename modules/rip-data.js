@@ -770,7 +770,7 @@
     const OFF = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="#ECE8DC"/><text x="40" y="38" font-family="system-ui" font-size="22" text-anchor="middle" fill="#9BA0A8">☁</text><text x="40" y="56" font-family="system-ui" font-size="9" text-anchor="middle" fill="#9BA0A8">offloaded</text></svg>');
     const SZ = { small: { m: 96, h: 72 }, med: { m: 140, h: 104 }, lg: { m: 190, h: 142 }, xl: { m: 260, h: 195 }, xxl: { m: 360, h: 270 } };
     const sz = SZ[state.photoSize] || SZ.med;
-    const BTN = 'width:22px;height:22px;border-radius:50%;border:0;cursor:pointer;font-size:12px;line-height:1;padding:0;box-shadow:0 1px 3px rgba(0,0,0,.25)';
+    const BTN = 'width:44px;height:44px;border-radius:50%;border:0;cursor:pointer;font-size:19px;line-height:1;padding:0;box-shadow:0 1px 4px rgba(0,0,0,.3)';
     let html = '<div style="padding:12px 14px">';
     keys.forEach((k) => {
       const g = groups.get(k);

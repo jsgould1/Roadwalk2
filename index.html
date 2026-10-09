@@ -101,7 +101,7 @@
 <script src="modules/library.js" defer></script>
 <script src="modules/route-tools.js" defer></script>
 <script src="modules/aecom-toggle.js?v=2" defer></script>
-<script src="modules/rip-data.js?v=21" defer></script>
+<script src="modules/rip-data.js?v=22" defer></script>
 <script src="modules/rip-import.js?v=2" defer></script>
 <script src="modules/rip-map.js?v=14" defer></script>
 <script src="modules/rip-pathweb.js?v=2" defer></script>
@@ -4297,6 +4297,16 @@ body.rw-sld-photo-dragging .strip-pin {
 /* Photo popup (inside a Leaflet popup) */
 /* Click opens the popup at ~3x the base preview size. */
 .gp-pop { width: min(744px, 86vw); }
+/* Icon action buttons overlaid on the popup image (same set as the RIP Photos cards). */
+.gp-pop-imgwrap { position: relative; }
+.gp-pop-acts { position: absolute; top: 8px; right: 8px; display: flex; gap: 7px; }
+.gp-ib {
+  width: 44px; height: 44px; border-radius: 50%; border: 0; cursor: pointer;
+  font-size: 19px; line-height: 1; background: rgba(255,255,255,0.93); color: #0B3D66;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+.gp-ib.gp-ib-heart { color: #C85A2B; }
+.gp-ib.on { background: #C85A2B; color: #fff; }
 .gp-pop-img {
   width: 100%; max-height: min(600px, 70vh); object-fit: contain; background: #f4f1e8;
   border-radius: 4px; display: block; cursor: zoom-in;
@@ -9160,7 +9170,7 @@ body.mobile-mode #app {
       <button class="app-tab" data-module="file" role="tab" aria-selected="false"
               title="File — New, Open, Save, and Import/Export components">
         <span class="app-tab-icon">🗂</span><span class="app-tab-label">File</span></button>
-      <button class="app-tab" data-module="project" role="tab" aria-selected="false"
+      <button class="app-tab" data-module="project" role="tab" aria-selected="false" style="display:none"
               title="Project information — details, client, contract, contacts">
         <span class="app-tab-icon">📁</span><span class="app-tab-label">Project</span></button>
       <button class="app-tab active" data-module="dashboard" role="tab" aria-selected="true"
@@ -9181,10 +9191,10 @@ body.mobile-mode #app {
       <button class="app-tab" data-module="tracks" role="tab" aria-selected="false" style="display:none"
               title="Photo tracks — station &times; visit grid for grouping across passes">
         <span class="app-tab-icon">🎞</span><span class="app-tab-label">Tracks</span></button>
-      <button class="app-tab" data-module="log" role="tab" aria-selected="false"
+      <button class="app-tab" data-module="log" role="tab" aria-selected="false" style="display:none"
               title="Daily field log">
         <span class="app-tab-icon">📅</span><span class="app-tab-label">Log</span></button>
-      <button class="app-tab" data-module="safety" role="tab" aria-selected="false"
+      <button class="app-tab" data-module="safety" role="tab" aria-selected="false" style="display:none"
               title="Safety (JSB, PPE, THA)">
         <span class="app-tab-icon">⚠️</span><span class="app-tab-label">Safety</span></button>
       <button class="app-tab app-tab-gear" id="header-styleguide-btn" type="button"
@@ -37745,30 +37755,8 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         updateCount();
       });
     });
-    // Heart toggle — include this photo in the photo report (same flag as the
-    // map double-click and the RIP Photos tab / report builder).
-    var heart = document.createElement('button');
-    heart.className = 'gp-pop-save';
-    heart.title = 'Heart = include this photo in the photo report';
-    function paintHeart() {
-      heart.textContent = p.hearted ? '♥ Hearted' : '♡ Heart';
-      heart.style.background = p.hearted ? '#C85A2B' : '';
-      heart.style.color = p.hearted ? '#fff' : '';
-    }
-    paintHeart();
-    heart.addEventListener('click', function () {
-      p.hearted = !p.hearted;
-      dbPut(p).then(function () {
-        var el = m.getElement(); if (el) el.classList.toggle('gp-hearted', !!p.hearted);
-        paintHeart();
-        if (window.RW2PhotoReport && document.getElementById('pr-overlay')
-            && document.getElementById('pr-overlay').classList.contains('on')) {
-          try { window.RW2PhotoReport.open(); } catch (e) {}
-        }
-      });
-    });
+    // (Heart / Copy / Save are the icon buttons overlaid on the image above.)
     btns.appendChild(save);
-    btns.appendChild(heart);
     btns.appendChild(del);
 
     // --- Asset-tagging actions ----------------------------------------
@@ -37801,19 +37789,6 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       });
       actions.appendChild(rtBtn);
     }
-    // Save / Copy the full-size (watermarked) image — same as the RIP Photos tab.
-    if (window.RW2PhotoExport) {
-      var saveImgBtn = document.createElement('button');
-      saveImgBtn.textContent = '⤓ Save image';
-      saveImgBtn.title = 'Download the full-size image (watermarked)';
-      saveImgBtn.addEventListener('click', function () { try { window.RW2PhotoExport.save(p.id); } catch (e) {} });
-      actions.appendChild(saveImgBtn);
-      var copyImgBtn = document.createElement('button');
-      copyImgBtn.textContent = '⧉ Copy';
-      copyImgBtn.title = 'Copy the full-size image (watermarked) to the clipboard';
-      copyImgBtn.addEventListener('click', function () { try { window.RW2PhotoExport.copy(p.id, copyImgBtn); } catch (e) {} });
-      actions.appendChild(copyImgBtn);
-    }
     if (p.linked_pin_id) {
       var unTagBtn = document.createElement('button');
       unTagBtn.className = 'muted';
@@ -37843,7 +37818,35 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       _enterGroupMode(p, m);
     });
 
-    box.appendChild(img);
+    // Image with the icon action cluster overlaid (heart / copy / save), the
+    // same buttons as the RIP Photos cards.
+    var imgWrap = document.createElement('div');
+    imgWrap.className = 'gp-pop-imgwrap';
+    imgWrap.appendChild(img);
+    var cluster = document.createElement('div');
+    cluster.className = 'gp-pop-acts';
+    var hBtn = document.createElement('button');
+    hBtn.className = 'gp-ib gp-ib-heart';
+    hBtn.title = 'Heart = include in the photo report';
+    function _paintHeart() { hBtn.textContent = p.hearted ? '♥' : '♡'; hBtn.classList.toggle('on', !!p.hearted); }
+    _paintHeart();
+    hBtn.addEventListener('click', function (e) {
+      e.stopPropagation(); p.hearted = !p.hearted;
+      dbPut(p).then(function () {
+        var mel = m.getElement ? m.getElement() : null; if (mel) mel.classList.toggle('gp-hearted', !!p.hearted);
+        _paintHeart();
+        if (window.RW2PhotoReport && document.getElementById('pr-overlay') && document.getElementById('pr-overlay').classList.contains('on')) { try { window.RW2PhotoReport.open(); } catch (_) {} }
+      });
+    });
+    var cBtn = document.createElement('button');
+    cBtn.className = 'gp-ib'; cBtn.textContent = '⧉'; cBtn.title = 'Copy image to clipboard';
+    cBtn.addEventListener('click', function (e) { e.stopPropagation(); if (window.RW2PhotoExport) window.RW2PhotoExport.copy(p.id, cBtn); });
+    var sBtn = document.createElement('button');
+    sBtn.className = 'gp-ib'; sBtn.textContent = '⤓'; sBtn.title = 'Save full-size image';
+    sBtn.addEventListener('click', function (e) { e.stopPropagation(); if (window.RW2PhotoExport) window.RW2PhotoExport.save(p.id); });
+    cluster.appendChild(hBtn); cluster.appendChild(cBtn); cluster.appendChild(sBtn);
+    imgWrap.appendChild(cluster);
+    box.appendChild(imgWrap);
     box.appendChild(meta);
     if (status) box.appendChild(status);
     box.appendChild(ta);
