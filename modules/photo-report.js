@@ -118,13 +118,16 @@
   function watermarkLines(p) {
     var lines = [];
     if (p.rip_route) {
-      lines.push(p.rip_route + (p.rip_route_fmss ? '  ·  FMSS ' + p.rip_route_fmss : ''));
+      lines.push(p.rip_route + (p.rip_route_name ? '  ·  ' + p.rip_route_name : ''));
       var sm = [];
+      if (p.rip_route_fmss) sm.push('FMSS ' + p.rip_route_fmss);
       if (p.rip_route_sta != null) sm.push('STA ' + fmtSta(p.rip_route_sta));
       if (p.rip_route_mp != null) sm.push('MP ' + Number(p.rip_route_mp).toFixed(2));
       if (sm.length) lines.push(sm.join('  ·  '));
     } else if (p.rip_lot) {
-      lines.push('🅿 ' + p.rip_lot + (p.rip_lot_fmss ? '  ·  FMSS ' + p.rip_lot_fmss : ''));
+      lines.push(p.rip_lot + (p.rip_lot_name ? '  ·  ' + p.rip_lot_name : ''));
+      if (p.rip_lot_fmss) lines.push('FMSS ' + p.rip_lot_fmss + ' · parking lot');
+      else lines.push('parking lot');
     }
     var g = [];
     if (isFinite(Number(p.lat)) && isFinite(Number(p.lng))) g.push(Number(p.lat).toFixed(6) + ', ' + Number(p.lng).toFixed(6));

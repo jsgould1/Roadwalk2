@@ -1092,7 +1092,7 @@
       + '</div>';
 
     host.innerHTML =
-      '<div style="max-width:' + (state.tab === 'photos' ? '100%' : '1240px') + ';margin:0 auto;padding:16px 16px 40px;font-family:system-ui">'
+      '<div style="' + (state.tab === 'photos' ? 'width:100%;max-width:100%;' : 'max-width:1240px;') + 'margin:0 auto;padding:16px 16px 40px;font-family:system-ui;box-sizing:border-box">'
 
       + '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:14px">'
       + '<div><div style="font-size:12px;color:#8a949f;text-transform:uppercase;letter-spacing:.6px">RIP Cycle ' + esc(state.bundle.cycle) + '</div>'
