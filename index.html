@@ -101,7 +101,7 @@
 <script src="modules/library.js" defer></script>
 <script src="modules/route-tools.js" defer></script>
 <script src="modules/aecom-toggle.js?v=2" defer></script>
-<script src="modules/rip-data.js?v=19" defer></script>
+<script src="modules/rip-data.js?v=20" defer></script>
 <script src="modules/rip-import.js?v=2" defer></script>
 <script src="modules/rip-map.js?v=14" defer></script>
 <script src="modules/rip-pathweb.js?v=2" defer></script>
@@ -118,9 +118,9 @@
 <script src="modules/map-tools.js?v=4" defer></script>
 <script src="modules/flip-sta.js" defer></script>
 <script src="modules/photo-sets.js?v=3" defer></script>
-<script src="modules/photo-autotag.js?v=2" defer></script>
+<script src="modules/photo-autotag.js?v=3" defer></script>
 <script src="modules/photo-route-view.js?v=4" defer></script>
-<script src="modules/photo-report.js?v=6" defer></script>
+<script src="modules/photo-report.js?v=7" defer></script>
 
 <style>
 /* ============================================================
@@ -37524,6 +37524,8 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     '<text x="60" y="56" font-family="system-ui" font-size="30" text-anchor="middle" fill="#9BA0A8">☁</text>' +
     '<text x="60" y="82" font-family="system-ui" font-size="11" text-anchor="middle" fill="#9BA0A8">offloaded</text></svg>');
   function _imgSrc(p) { return (p && p.dataUrl) ? p.dataUrl : _OFFLOADED_SRC; }
+  var _CARD16 = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+  function _cardinal(deg) { return _CARD16[Math.round((((+deg % 360) + 360) % 360) / 22.5) % 16]; }
 
   function tipFor(p) {
     var parts = [];
@@ -37686,7 +37688,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     var meta = document.createElement('div');
     meta.className = 'gp-pop-meta';
     meta.textContent = p.lat.toFixed(6) + ', ' + p.lng.toFixed(6) +
-      (p.bearing != null && isFinite(p.bearing) ? '  ·  bearing ' + Math.round(p.bearing) + '°' : '');
+      (p.bearing != null && isFinite(p.bearing) ? '  ·  bearing ' + Math.round(p.bearing) + '° (' + _cardinal(p.bearing) + ')' : '');
 
     // RIP route / lot tags written by the auto-tag tool, shown so the photo's
     // section assignment is visible right on the map.

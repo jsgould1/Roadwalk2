@@ -232,8 +232,11 @@
     return { ft: best, sta: bestSta, total: cum };
   }
   function mpFor(route, sta, total) {
-    if (route.begMp == null || route.endMp == null || !total) return null;
-    return route.begMp + (sta / total) * (route.endMp - route.begMp);
+    // Prefer the route's real milepost range; otherwise fall back to miles from
+    // the route start so an MP value is always available (short access roads and
+    // lots often have no BEG/END_MP_DCV).
+    if (route.begMp != null && route.endMp != null && total) return route.begMp + (sta / total) * (route.endMp - route.begMp);
+    return sta / 5280;
   }
   function routeByIdent(id) { for (var i = 0; i < ROUTES.length; i++) if (ROUTES[i].ident === id) return ROUTES[i]; return null; }
   // Public: station + milepost of a point on a given route ('' if unknown).

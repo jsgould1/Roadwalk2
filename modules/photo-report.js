@@ -119,28 +119,41 @@
 
   // Survey station from along-route feet: 1234 ft → "12+34".
   function fmtSta(ft) { var s = Math.max(0, Math.round(ft)); return Math.floor(s / 100) + '+' + String(s % 100).padStart(2, '0'); }
+  // 16-point compass heading: 110° → "ESE".
+  var _CARD16 = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+  function cardinal(deg) { return _CARD16[Math.round((((+deg % 360) + 360) % 360) / 22.5) % 16]; }
 
   // Watermark content as ordered lines (top row = route + FMSS, then STA/MP,
   // then GPS + bearing, then capture date/time).
+  // Layout (space-separated columns, no dot separators):
+  //   ROUTE-ID   ROUTE NAME                 (bold)
+  //   FMSS 12345
+  //   STA 12+34   MP 0.23   37.531053, -85.733772
+  //   110° (ESE)   9/28/2026, 3:53:13 PM
   function watermarkLines(p) {
     var lines = [];
+    var gps = (isFinite(Number(p.lat)) && isFinite(Number(p.lng))) ? (Number(p.lat).toFixed(6) + ', ' + Number(p.lng).toFixed(6)) : '';
+    var brg = (p.bearing != null && isFinite(Number(p.bearing))) ? (Math.round(p.bearing) + '° (' + cardinal(p.bearing) + ')') : '';
+    var dt = '';
+    if (p.ts) { var d = new Date(p.ts); if (!isNaN(d.getTime())) dt = d.toLocaleString(); }
+
     if (p.rip_route) {
-      lines.push(p.rip_route + (p.rip_route_name ? '  ·  ' + p.rip_route_name : ''));
-      var sm = [];
-      if (p.rip_route_fmss) sm.push('FMSS ' + p.rip_route_fmss);
-      if (p.rip_route_sta != null) sm.push('STA ' + fmtSta(p.rip_route_sta));
-      if (p.rip_route_mp != null) sm.push('MP ' + Number(p.rip_route_mp).toFixed(2));
-      if (sm.length) lines.push(sm.join('  ·  '));
+      lines.push(p.rip_route + (p.rip_route_name ? '   ' + p.rip_route_name : ''));
+      if (p.rip_route_fmss) lines.push('FMSS ' + p.rip_route_fmss);
+      var l3 = [];
+      if (p.rip_route_sta != null) l3.push('STA ' + fmtSta(p.rip_route_sta));
+      if (p.rip_route_mp != null) l3.push('MP ' + Number(p.rip_route_mp).toFixed(2));
+      if (gps) l3.push(gps);
+      if (l3.length) lines.push(l3.join('   '));
     } else if (p.rip_lot) {
-      lines.push(p.rip_lot + (p.rip_lot_name ? '  ·  ' + p.rip_lot_name : ''));
-      if (p.rip_lot_fmss) lines.push('FMSS ' + p.rip_lot_fmss + ' · parking lot');
-      else lines.push('parking lot');
+      lines.push(p.rip_lot + (p.rip_lot_name ? '   ' + p.rip_lot_name : ''));
+      lines.push(p.rip_lot_fmss ? ('FMSS ' + p.rip_lot_fmss + '   parking lot') : 'parking lot');
+      if (gps) lines.push(gps);
+    } else if (gps) {
+      lines.push(gps);
     }
-    var g = [];
-    if (isFinite(Number(p.lat)) && isFinite(Number(p.lng))) g.push(Number(p.lat).toFixed(6) + ', ' + Number(p.lng).toFixed(6));
-    if (p.bearing != null && isFinite(Number(p.bearing))) g.push(Math.round(p.bearing) + '°');
-    if (g.length) lines.push(g.join('  ·  '));
-    if (p.ts) { var d = new Date(p.ts); if (!isNaN(d.getTime())) lines.push(d.toLocaleString()); }
+    var l4 = [brg, 'AECOM', dt].filter(Boolean).join('   ');
+    if (l4) lines.push(l4);
     return lines;
   }
 
@@ -181,7 +194,7 @@
       '.imgbox{position:relative;flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;background:#F4F1E8;border:1px solid #DDD7C8}' +
       '.imgbox img{max-width:100%;max-height:100%;object-fit:contain}' +
       '.wm{position:absolute;left:0;bottom:0;max-width:100%;background:rgba(17,17,17,0.64);color:#fff;font:600 8px "IBM Plex Mono",monospace;letter-spacing:.2px;padding:3px 7px;border-radius:0 6px 0 0;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
-      '.wm div{line-height:1.4;white-space:nowrap}' +
+      '.wm div{line-height:1.4;white-space:pre}' +
       '.wm .wm0{font-weight:700;font-size:9px}' +
       '.cap{flex:0 0 auto;font-size:10.5px;line-height:1.3;color:#1A1D22;padding:4px 2px 0;min-height:14px}';
     w.document.open();

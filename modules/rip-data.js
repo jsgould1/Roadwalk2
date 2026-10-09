@@ -906,9 +906,13 @@
     }, 250);
   }
 
-  // Full-screen lightbox: view the clean image large, open in a tab, or save
-  // (tab + save are watermarked; the in-lightbox view stays clean).
-  let _lbSrc = null, _lbId = null;
+  const _CARD16 = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+  function _cardinal(d) { return _CARD16[Math.round((((+d % 360) + 360) % 360) / 22.5) % 16]; }
+
+  // Nearly full-screen in-app lightbox showing the FULL-SIZE original (no new
+  // browser window). Save downloads the full-size watermarked image.
+  let _lbSrc = null, _lbId = null, _lbObjUrl = null;
+  function _lbRevoke() { if (_lbObjUrl) { try { URL.revokeObjectURL(_lbObjUrl); } catch (e) {} _lbObjUrl = null; } }
   function openLightbox(id) {
     const api = window._RW && window._RW.geophotos;
     const p = api && api.get && api.get(id); if (!p) return;
@@ -916,30 +920,21 @@
     if (!ov) {
       ov = document.createElement('div');
       ov.id = 'rip-lightbox';
-      ov.style.cssText = 'position:fixed;inset:0;z-index:4300;background:rgba(10,12,16,.88);display:none;flex-direction:column;align-items:center;justify-content:center;padding:56px 18px 18px';
+      ov.style.cssText = 'position:fixed;inset:0;z-index:4300;background:rgba(10,12,16,.93);display:none;flex-direction:column;align-items:center;justify-content:center;padding:44px 8px 8px';
       const btn = 'border:1px solid #fff;background:transparent;color:#fff;border-radius:7px;padding:6px 11px;cursor:pointer;font:600 12.5px system-ui;text-decoration:none;display:inline-block';
       ov.innerHTML =
-        '<div style="position:absolute;top:0;left:0;right:0;display:flex;gap:9px;align-items:center;padding:12px 16px;color:#fff;font:600 13px system-ui;background:linear-gradient(rgba(0,0,0,.55),transparent)">'
+        '<div style="position:absolute;top:0;left:0;right:0;display:flex;gap:9px;align-items:center;padding:11px 16px;color:#fff;font:600 13px system-ui;background:linear-gradient(rgba(0,0,0,.6),transparent);z-index:2">'
         + '<span id="riplb-title" style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>'
         + '<a id="riplb-dl" download style="' + btn + '">⤓ Save</a>'
-        + '<button id="riplb-tab" style="' + btn + '">↗ Open in tab</button>'
         + '<button id="riplb-map" style="' + btn + '">🗺 Map</button>'
         + '<button id="riplb-close" style="' + btn + '">✕ Close</button></div>'
-        + '<img id="riplb-img" alt="" style="max-width:94vw;max-height:76vh;object-fit:contain;border-radius:6px;background:#1b1d22">'
-        + '<div id="riplb-meta" style="color:#cdd3da;font:500 12px system-ui;margin-top:12px;text-align:center;max-width:92vw;line-height:1.5"></div>';
+        + '<img id="riplb-img" alt="" style="max-width:97vw;max-height:90vh;object-fit:contain;border-radius:6px;background:#1b1d22">'
+        + '<div id="riplb-meta" style="color:#cdd3da;font:500 12px system-ui;margin-top:10px;text-align:center;max-width:94vw;line-height:1.5"></div>';
       document.body.appendChild(ov);
-      const close = () => { ov.style.display = 'none'; };
+      const close = () => { ov.style.display = 'none'; _lbRevoke(); };
       ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
       document.getElementById('riplb-close').onclick = close;
       document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && ov.style.display !== 'none') close(); });
-      document.getElementById('riplb-tab').onclick = () => {
-        if (!_lbId) return;
-        const api = window._RW && window._RW.geophotos;   // open the actual full-size original (clean)
-        (api && api.original ? api.original(_lbId) : Promise.resolve(null)).then((blob) => {
-          const url = blob ? URL.createObjectURL(blob) : _lbSrc;
-          if (url) window.open(url, '_blank');
-        });
-      };
       document.getElementById('riplb-dl').onclick = (e) => { e.preventDefault(); if (_lbId) savePhoto(_lbId); };
     }
     _lbId = id;
@@ -952,19 +947,23 @@
       if (p.rip_route_mp != null) rm += ' · MP ' + Number(p.rip_route_mp).toFixed(2);
       bits.push(rm);
     }
-    if (isFinite(Number(p.lat)) && isFinite(Number(p.lng))) bits.push(Number(p.lat).toFixed(6) + ', ' + Number(p.lng).toFixed(6) + (p.bearing != null && isFinite(Number(p.bearing)) ? ' · ' + Math.round(p.bearing) + '°' : ''));
+    if (isFinite(Number(p.lat)) && isFinite(Number(p.lng))) bits.push(Number(p.lat).toFixed(6) + ', ' + Number(p.lng).toFixed(6) + (p.bearing != null && isFinite(Number(p.bearing)) ? ' · ' + Math.round(p.bearing) + '° (' + _cardinal(p.bearing) + ')' : ''));
     if (p.ts) { const d = new Date(p.ts); if (!isNaN(d.getTime())) bits.push(d.toLocaleString()); }
     if (p.description) bits.push('“' + p.description + '”');
     document.getElementById('riplb-meta').innerHTML = bits.map((b) => esc(b)).join('<br>');
     // map jump
     document.getElementById('riplb-map').onclick = () => { ov.style.display = 'none'; flyToPhoto(p); };
-    // image (restores offloaded sets)
+    // Show the FULL-SIZE original in-app (falls back to the downscaled display
+    // image for older photos with no stored original, or offloaded sets).
     const imgEl = document.getElementById('riplb-img');
-    imgEl.src = ''; _lbSrc = null;
+    _lbRevoke(); imgEl.src = ''; _lbSrc = null;
     ov.style.display = 'flex';
-    resolvePhotoImg(id).then((src) => {
-      if (!src) { imgEl.alt = 'Image offloaded — turn its photo set back on to view.'; return; }
-      _lbSrc = src; imgEl.src = src;   // clean view; Save/Open-in-tab watermark it
+    (api && api.original ? api.original(id) : Promise.resolve(null)).then((blob) => {
+      if (blob) { _lbObjUrl = URL.createObjectURL(blob); _lbSrc = _lbObjUrl; imgEl.src = _lbObjUrl; return; }
+      return resolvePhotoImg(id).then((src) => {
+        if (!src) { imgEl.alt = 'Image offloaded — turn its photo set back on to view.'; return; }
+        _lbSrc = src; imgEl.src = src;
+      });
     });
   }
 
