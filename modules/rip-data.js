@@ -144,6 +144,7 @@
     park: null, bundle: null, segments: [], segsByRoute: new Map(),
     tab: 'assets', metric: 'PCR', limit: PAGE,
     photoSize: (function () { try { return localStorage.getItem('rw_rip_photo_size') || 'med'; } catch (e) { return 'med'; } })(),
+    photoHeartedOnly: (function () { try { return localStorage.getItem('rw_rip_photo_hearted') === '1'; } catch (e) { return false; } })(),
     sort: { key: 'ROUTE_IDENT', dir: 1 },
     q: '', kind: 'all', scope: 'all', facets: {}, range: { min: '', max: '' },
     cols: { assets: DEFAULT_COLS.assets.slice(), conditions: DEFAULT_COLS.conditions.slice() },
@@ -742,8 +743,10 @@
   function photosTable() {
     const api = window._RW && window._RW.geophotos;
     if (!api || !api.list) return { html: '<div style="padding:40px;text-align:center;color:#8a949f">Field photos module not loaded.</div>' };
-    const photos = api.list();
-    if (!photos.length) return { html: '<div style="padding:40px;text-align:center;color:#8a949f">No field photos yet. Import photos, then use <b>Tag photos to routes</b> in the Photo Triage module.</div>' };
+    const all = api.list();
+    if (!all.length) return { html: '<div style="padding:40px;text-align:center;color:#8a949f">No field photos yet. Import photos, then use <b>Tag photos to routes</b> in the Photo Triage module.</div>' };
+    const photos = state.photoHeartedOnly ? all.filter((p) => p.hearted) : all;
+    if (!photos.length) return { html: '<div style="padding:40px;text-align:center;color:#8a949f">No hearted photos yet. Uncheck <b>Hearted only</b> or heart some photos (♥) to include them in the report.</div>' };
 
     // group by the PRIMARY feature: being inside a lot wins over proximity to a
     // road; otherwise road wins; otherwise a nearby lot; else Unassigned.
@@ -794,7 +797,7 @@
           + '<button data-rip-fly="' + esc(p.id) + '" title="Fly to this photo on the map" style="' + BTN + ';background:rgba(255,255,255,.92);color:#0B3D66">🗺</button>'
           + '</div>'
           + '<input data-rip-cap="' + esc(p.id) + '" value="' + esc(cap) + '" placeholder="Add description…" '
-          + 'style="width:100%;box-sizing:border-box;border:0;border-top:1px solid #eef1f4;font:500 10.5px system-ui;color:#33414f;padding:4px 5px">'
+          + 'style="width:100%;box-sizing:border-box;border:0;border-top:1px solid #eef1f4;font:500 13px system-ui;color:#33414f;padding:6px 7px">'
           + '</div>';
       });
       html += '</div></div>';
@@ -1262,6 +1265,7 @@
       + ((state.tab === 'assets' || state.tab === 'conditions') ? '<button id="rip-cols-btn" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">Columns ▾</button>' : '')
       + (state.tab !== 'custom' && state.tab !== 'photos' ? '<button id="rip-csv" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">⬇ CSV</button>' : '')
       + (state.tab === 'photos' ? '<button id="rip-print-pdf" title="Heart photos, add captions, and print a photo-report PDF" style="border:0;background:#C85A2B;color:#fff;border-radius:8px;padding:6px 12px;cursor:pointer;font:700 12.5px system-ui">🖨 Print Photo PDF</button>'
+          + '<label title="Show only hearted photos so you can review and trim the selection" style="display:inline-flex;align-items:center;gap:5px;font:600 12px system-ui;color:#12233b;border:1px solid ' + (state.photoHeartedOnly ? '#C85A2B' : '#d3dae1') + ';background:' + (state.photoHeartedOnly ? '#FBEDE6' : '#fff') + ';border-radius:8px;padding:5px 10px;cursor:pointer"><input type="checkbox" id="rip-photo-hearted"' + (state.photoHeartedOnly ? ' checked' : '') + ' style="margin:0;cursor:pointer"><span style="color:#C85A2B">♥</span> Hearted only</label>'
           + '<span style="font-size:12px;color:#8a949f">Size</span><select id="rip-photo-size" style="border:1px solid #d3dae1;border-radius:8px;padding:4px 7px;font:12.5px system-ui;background:#fff">'
           + [['small', 'Small'], ['med', 'Medium'], ['lg', 'Large'], ['xl', 'X-Large'], ['xxl', 'XX-Large']].map((o) => '<option value="' + o[0] + '"' + (state.photoSize === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('')
           + '</select>' : '')
@@ -1293,6 +1297,8 @@
     if (prPdf) prPdf.onclick = () => { if (window.RW2PhotoReport && window.RW2PhotoReport.open) window.RW2PhotoReport.open(); };
     const psz = $('rip-photo-size');
     if (psz) psz.onchange = () => { state.photoSize = psz.value; try { localStorage.setItem('rw_rip_photo_size', psz.value); } catch (e) {} render(); };
+    const phh = $('rip-photo-hearted');
+    if (phh) phh.onchange = () => { state.photoHeartedOnly = phh.checked; try { localStorage.setItem('rw_rip_photo_hearted', phh.checked ? '1' : '0'); } catch (e) {} render(); };
 
     // Assets → Photos: jump to the Photos tab, focused on this route's section.
     host.querySelectorAll('[data-photos]').forEach((b) => b.onclick = (e) => {
