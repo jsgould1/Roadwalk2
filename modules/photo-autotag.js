@@ -259,7 +259,14 @@
       if (!ROUTES.length && !LOTS.length) return { ok: false, reason: 'The loaded park has no route/lot geometry.' };
 
       var all = g.list();
-      var pick = (ids && ids.length) ? all.filter(function (p) { return ids.indexOf(p.id) !== -1; }) : all;
+      var base = (ids && ids.length) ? all.filter(function (p) { return ids.indexOf(p.id) !== -1; }) : all;
+      // Only ever tag LOADED sets. An offloaded photo has had its display image
+      // dropped (delete p.dataUrl) to free RAM — its metadata still lives in the
+      // list, but re-tagging it against the currently-loaded park could wrongly
+      // reassign or clear tags it was given under a different park. Load a set to
+      // re-tag it. (p.dataUrl present == loaded.)
+      var offloadedSkipped = 0;
+      var pick = base.filter(function (p) { if (p.dataUrl) return true; offloadedSkipped++; return false; });
       var scanned = 0, taggedRt = 0, taggedLot = 0, ambig = 0, noGps = 0, cleared = 0;
       var byRoute = {}, changed = [];
 
@@ -303,7 +310,8 @@
       return Promise.resolve(g.saveMany(changed)).then(function () {
         try { g.refresh(); } catch (e) {}
         return { ok: true, scanned: scanned, taggedRt: taggedRt, taggedLot: taggedLot, ambig: ambig,
-                 noGps: noGps, cleared: cleared, routes: ROUTES.length, lots: LOTS.length, byRoute: byRoute, maxFt: maxFt };
+                 noGps: noGps, cleared: cleared, offloadedSkipped: offloadedSkipped,
+                 routes: ROUTES.length, lots: LOTS.length, byRoute: byRoute, maxFt: maxFt };
       });
     });
   }
@@ -328,7 +336,7 @@
         '<option value="30" selected>30 ft</option><option value="50">50 ft</option>' +
         '<option value="100">100 ft</option></select>' +
       '<button class="tg-suggest-btn" id="pat-tag-btn" type="button" ' +
-        'title="Tag every GPS photo with the RIP road it sits on/near and the parking lot it sits in/near">📍 Tag photos to routes</button>' +
+        'title="Tag GPS photos in loaded sets with the RIP road they sit on/near and the parking lot they sit in/near. Offloaded sets keep their existing tags — load a set to re-tag it.">📍 Tag photos to routes</button>' +
       '<button class="tg-suggest-btn" id="pat-retag-btn" type="button" ' +
         'title="Run only on photos that are still untagged — pick a wider distance above first">↻ Re-tag untagged only</button>' +
       '<span id="pat-status" style="flex:1 1 100%;font:500 11.5px system-ui;color:var(--mute,#9BA0A8)"></span>';
@@ -340,9 +348,9 @@
       if (!g) { status('Field photos not available.'); return; }
       var ids = g.list().filter(function (p) {
         var lat = Number(p.lat), lng = Number(p.lng);
-        return !p.rip_route && isFinite(lat) && isFinite(lng) && !(lat === 0 && lng === 0);
+        return p.dataUrl && !p.rip_route && isFinite(lat) && isFinite(lng) && !(lat === 0 && lng === 0);
       }).map(function (p) { return p.id; });
-      if (!ids.length) { status('No untagged GPS photos to re-tag.'); return; }
+      if (!ids.length) { status('No untagged GPS photos in loaded sets to re-tag.'); return; }
       var btn = document.getElementById('pat-retag-btn');
       btn.disabled = true; status('Re-tagging ' + ids.length + ' untagged photo(s) within ' + ft + ' ft…');
       tagPhotos(ft, ids).then(function (r) {
@@ -363,7 +371,8 @@
         var top = Object.keys(r.byRoute).sort(function (a, b) { return r.byRoute[b] - r.byRoute[a]; }).slice(0, 3)
                     .map(function (k) { return k + ' (' + r.byRoute[k] + ')'; }).join(', ');
         status('Tagged ' + r.taggedRt + ' to roads, ' + r.taggedLot + ' to lots, of ' + r.scanned +
-               ' GPS photos · ' + r.ambig + ' near 2+ roads' + (r.cleared ? ' · ' + r.cleared + ' cleared' : '') +
+               ' loaded GPS photos · ' + r.ambig + ' near 2+ roads' + (r.cleared ? ' · ' + r.cleared + ' cleared' : '') +
+               (r.offloadedSkipped ? ' · ' + r.offloadedSkipped + ' offloaded skipped' : '') +
                (top ? ' · top: ' + top : ''));
         // refresh the "View by route" dropdown so the new routes appear
         if (window.RW2RouteView && window.RW2RouteView.refresh) { try { window.RW2RouteView.refresh(); } catch (e) {} }
@@ -381,14 +390,17 @@
   else whenReady();
 
   // ---- post-upload tagging wizard -------------------------------------------
+  // Counts are scoped to LOADED photos only — offloaded sets are never tagged,
+  // so they don't belong in the "untagged remaining" math.
   function counts() {
-    var g = geo(); var gps = 0, tagged = 0, untagged = 0;
+    var g = geo(); var gps = 0, tagged = 0, untagged = 0, offloaded = 0;
     if (g) g.list().forEach(function (p) {
       var lat = Number(p.lat), lng = Number(p.lng);
       if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) return;
+      if (!p.dataUrl) { offloaded++; return; }
       gps++; if (p.rip_route) tagged++; else untagged++;
     });
-    return { gps: gps, tagged: tagged, untagged: untagged };
+    return { gps: gps, tagged: tagged, untagged: untagged, offloaded: offloaded };
   }
 
   function wstatus(msg) { var el = document.getElementById('patw-status'); if (el) el.textContent = msg || ''; }
@@ -397,7 +409,8 @@
     var c = counts();
     var sub = document.getElementById('patw-sub');
     if (sub) sub.textContent = (added ? 'Imported ' + added + ' photo' + (added === 1 ? '' : 's') + '. ' : '') +
-      c.gps + ' GPS photos · ' + c.tagged + ' tagged · ' + c.untagged + ' untagged.';
+      c.gps + ' loaded GPS photos · ' + c.tagged + ' tagged · ' + c.untagged + ' untagged' +
+      (c.offloaded ? ' · ' + c.offloaded + ' offloaded (not tagged)' : '') + '.';
     var parked = !!(rip() && rip().hasPark && rip().hasPark());
     var warn = document.getElementById('patw-warn');
     if (warn) warn.style.display = parked ? 'none' : 'block';
@@ -431,8 +444,8 @@
             '<select id="patw-ft"><option value="10">10 ft</option><option value="20">20 ft</option>' +
             '<option value="30" selected>30 ft</option><option value="50">50 ft</option><option value="100">100 ft</option></select></div>' +
           '<div class="row">' +
-            '<button class="go" id="patw-all">Tag all GPS photos</button>' +
-            '<button id="patw-un">Re-tag untagged only</button>' +
+            '<button class="go" id="patw-all" title="Tags GPS photos in loaded sets only — offloaded sets keep their existing tags">Tag loaded photos</button>' +
+            '<button id="patw-un" title="Only loaded photos that are still untagged">Re-tag untagged only</button>' +
             '<span style="flex:1"></span><button id="patw-done">Done</button></div>' +
           '<div id="patw-status" style="margin-top:10px;font:500 12px system-ui;color:#0e7c66;min-height:16px"></div>' +
         '</div></div>';
@@ -447,9 +460,9 @@
         var g = geo(); if (!g) return;
         ids = g.list().filter(function (p) {
           var lat = Number(p.lat), lng = Number(p.lng);
-          return !p.rip_route && isFinite(lat) && isFinite(lng) && !(lat === 0 && lng === 0);
+          return p.dataUrl && !p.rip_route && isFinite(lat) && isFinite(lng) && !(lat === 0 && lng === 0);
         }).map(function (p) { return p.id; });
-        if (!ids.length) { wstatus('No untagged GPS photos remain.'); return; }
+        if (!ids.length) { wstatus('No untagged GPS photos remain in loaded sets.'); return; }
       }
       document.getElementById('patw-all').disabled = true; document.getElementById('patw-un').disabled = true;
       wstatus('Tagging within ' + ft + ' ft…');
@@ -457,8 +470,9 @@
         updateWizCounts();
         if (!r.ok) { wstatus(r.reason); return; }
         wstatus('Tagged ' + r.taggedRt + ' to roads, ' + r.taggedLot + ' to lots' +
-          (r.ambig ? ' · ' + r.ambig + ' near 2+ roads' : '') + '. ' + counts().untagged + ' still untagged' +
-          (counts().untagged ? ' — try a wider distance.' : '.'));
+          (r.ambig ? ' · ' + r.ambig + ' near 2+ roads' : '') +
+          (r.offloadedSkipped ? ' · ' + r.offloadedSkipped + ' offloaded skipped' : '') + '. ' +
+          counts().untagged + ' still untagged' + (counts().untagged ? ' — try a wider distance.' : '.'));
         if (window.RW2RouteView && window.RW2RouteView.refresh) { try { window.RW2RouteView.refresh(); } catch (e) {} }
       }, function (e) {
         updateWizCounts(); wstatus('Failed: ' + (e && e.message ? e.message : e));
