@@ -127,6 +127,105 @@
   }
   function prRefresh() { renderTree(); renderBuilder(); updateSelCount(); }
 
+  // ---- descriptions CSV round-trip ------------------------------------------
+  // Export one row per photo in the current PDF selection, including a rebuilt
+  // on-disk file_path so descriptions can be authored externally; import a CSV
+  // to apply descriptions back to the matching photos, then re-generate.
+  function csvCell(v) {
+    v = (v == null) ? '' : String(v);
+    return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  }
+  function photoRelPath(p) {
+    if (p._relpath) return p._relpath;
+    return (p._set ? p._set + '/' : '') + (p._name || '');
+  }
+  function buildDescriptionsCsv() {
+    var base = (($('pr-photobase') && $('pr-photobase').value) || '').trim().replace(/[\\/]+$/, '');
+    var secs = selectedSections(grouped(true));
+    var lines = [['photo_id', 'filename', 'set', 'park', 'route', 'sta', 'mp', 'lat', 'lng', 'file_path', 'description'].map(csvCell).join(',')];
+    secs.forEach(function (s) {
+      var code = parkCodeOf(s.key);
+      s.photos.forEach(function (p) {
+        var rel = photoRelPath(p);
+        var full = base ? (base + '\\' + rel.replace(/\//g, '\\')) : rel;
+        lines.push([
+          p.id, p._name || '', p._set || '', code,
+          p.rip_route || (p.rip_lot ? 'lot:' + p.rip_lot : ''),
+          (p.rip_route_sta != null ? fmtSta(p.rip_route_sta) : ''),
+          (p.rip_route_mp != null ? p.rip_route_mp : ''),
+          (isFinite(Number(p.lat)) ? Number(p.lat).toFixed(6) : ''),
+          (isFinite(Number(p.lng)) ? Number(p.lng).toFixed(6) : ''),
+          full, p.description || ''
+        ].map(csvCell).join(','));
+      });
+    });
+    return lines.join('\r\n');
+  }
+  function downloadText(name, text, mime) {
+    try {
+      var blob = new Blob([text], { type: mime || 'text/csv;charset=utf-8' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a'); a.href = url; a.download = name;
+      document.body.appendChild(a); a.click();
+      setTimeout(function () { try { document.body.removeChild(a); } catch (e) {} URL.revokeObjectURL(url); }, 0);
+    } catch (e) { status('Download failed: ' + e); }
+  }
+  function exportDescriptionsCsv() {
+    var secs = selectedSections(grouped(true));
+    var n = 0; secs.forEach(function (s) { n += s.photos.length; });
+    if (!n) { status('Nothing selected — heart photos and pick routes first.'); return; }
+    downloadText('photo-descriptions-' + new Date().toISOString().slice(0, 10) + '.csv', buildDescriptionsCsv());
+    status('Exported ' + n + ' row(s). Fill the "description" column, then Import CSV.');
+  }
+  // minimal RFC4180-ish parser → array of row arrays
+  function parseCsv(text) {
+    var rows = [], row = [], cell = '', i = 0, inQ = false, c;
+    text = String(text).replace(/^﻿/, '');
+    while (i < text.length) {
+      c = text[i];
+      if (inQ) {
+        if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else inQ = false; }
+        else cell += c;
+      } else if (c === '"') inQ = true;
+      else if (c === ',') { row.push(cell); cell = ''; }
+      else if (c === '\r') { /* skip */ }
+      else if (c === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
+      else cell += c;
+      i++;
+    }
+    if (cell.length || row.length) { row.push(cell); rows.push(row); }
+    return rows;
+  }
+  function importDescriptionsCsv(text) {
+    var rows = parseCsv(text);
+    if (!rows.length) { status('CSV is empty.'); return; }
+    var head = rows[0].map(function (h) { return String(h || '').trim().toLowerCase(); });
+    var iId = head.indexOf('photo_id'), iName = head.indexOf('filename'), iSet = head.indexOf('set'), iDesc = head.indexOf('description');
+    if (iDesc < 0) { status('CSV needs a "description" column.'); return; }
+    var g = geo(); if (!g) { status('Field photos module not available.'); return; }
+    var all = g.list(), byId = {}; all.forEach(function (p) { byId[p.id] = p; });
+    var updated = 0, unmatched = 0, saves = [];
+    for (var r = 1; r < rows.length; r++) {
+      var row = rows[r]; if (!row || !row.length) continue;
+      var desc = ((iDesc < row.length ? row[iDesc] : '') || '').trim();
+      if (!desc) continue;                       // only apply non-empty descriptions
+      var p = null;
+      if (iId >= 0 && row[iId]) p = byId[row[iId].trim()];
+      if (!p && iName >= 0 && row[iName]) {       // fallback: filename (+ set)
+        var fn = row[iName].trim(), st = (iSet >= 0 && row[iSet]) ? row[iSet].trim() : null;
+        p = all.filter(function (x) { return x._name === fn && (st == null || (x._set || '') === st); })[0]
+          || all.filter(function (x) { return x._name === fn; })[0];
+      }
+      if (!p) { unmatched++; continue; }
+      if (p.description !== desc) { p.description = desc; saves.push(p); }
+      updated++;
+    }
+    Promise.all(saves.map(function (p) { try { return geo().save(p); } catch (e) { return null; } })).then(function () {
+      renderBuilder();
+      status('Applied descriptions to ' + updated + ' photo(s)' + (unmatched ? ' · ' + unmatched + ' unmatched' : '') + '.');
+    });
+  }
+
   function imageFor(id) {
     var ps = psets();
     if (ps && ps.imageFor) return ps.imageFor(id);
@@ -627,6 +726,10 @@
             '<label style="font:600 12px system-ui;color:#555;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pr-hearted" checked> hearted only</label>' +
             '<label style="font:600 12px system-ui;color:#555;display:flex;align-items:center;gap:4px" title="Overlay GPS + date/time on each photo in the PDF"><input type="checkbox" id="pr-wm" checked> watermark</label>' +
             '<label style="font:600 12px system-ui;color:#555;display:flex;align-items:center;gap:4px" title="Show \'Page N of X\' in the footer (AECOM logo + Route ID always print)"><input type="checkbox" id="pr-pagenums" checked> page numbers</label>' +
+            '<span style="width:1px;height:18px;background:var(--rule,#DDD7C8)"></span>' +
+            '<input id="pr-photobase" placeholder="Photos base folder (for CSV file paths)" title="Absolute folder the photos were imported from — used to build file_path in the descriptions CSV" style="font:600 11.5px system-ui;padding:5px 8px;border:1px solid var(--rule,#DDD7C8);border-radius:6px;min-width:190px">' +
+            '<button class="pr-btn" id="pr-csv-out" title="Export a CSV of the selected photos (with file paths) so descriptions can be authored externally">⬇ Descr. CSV</button>' +
+            '<label class="pr-btn" id="pr-csv-in-lbl" title="Import a CSV to apply descriptions to the matching photos" style="cursor:pointer;display:inline-flex;align-items:center">⬆ Import CSV<input type="file" id="pr-csv-in" accept=".csv,text/csv" style="display:none"></label>' +
             '<span id="pr-count" style="font:600 12px \'IBM Plex Mono\',monospace;color:var(--mute,#9BA0A8)">0 hearted</span>' +
             '<span class="sp"></span>' +
             '<span id="pr-status" style="font:500 11.5px system-ui;color:var(--mute,#9BA0A8)"></span>' +
@@ -642,11 +745,22 @@
       $('pr-hearted').addEventListener('change', renderBuilder);
       $('pr-wm').addEventListener('change', function () { try { localStorage.setItem('rw_export_watermark', $('pr-wm').checked ? '1' : '0'); } catch (e) {} });
       $('pr-pagenums').addEventListener('change', function () { try { localStorage.setItem('rw_report_pagenums', $('pr-pagenums').checked ? '1' : '0'); } catch (e) {} });
+      $('pr-csv-out').addEventListener('click', exportDescriptionsCsv);
+      $('pr-csv-in').addEventListener('change', function () {
+        var f = this.files && this.files[0]; if (!f) return;
+        var rd = new FileReader();
+        rd.onload = function () { importDescriptionsCsv(String(rd.result || '')); };
+        rd.onerror = function () { status('Could not read the CSV file.'); };
+        rd.readAsText(f); this.value = '';
+      });
+      var pb = $('pr-photobase');
+      if (pb) pb.addEventListener('input', function () { try { localStorage.setItem('rw_report_photo_base', pb.value); } catch (e) {} });
     }
     ov.classList.add('on');
     // Reflect the global export-watermark setting (save/copy/print share it).
     var pw = $('pr-wm'); if (pw) { try { pw.checked = localStorage.getItem('rw_export_watermark') !== '0'; } catch (e) {} }
     var pn = $('pr-pagenums'); if (pn) { try { pn.checked = localStorage.getItem('rw_report_pagenums') !== '0'; } catch (e) {} }
+    var pbx = $('pr-photobase'); if (pbx && !pbx.value) { try { pbx.value = localStorage.getItem('rw_report_photo_base') || ''; } catch (e) {} }
     // Warm the route geometry so STA/MP are ready when Generate is clicked.
     if (window.RW2PhotoTag && window.RW2PhotoTag.ensureGeo) { try { window.RW2PhotoTag.ensureGeo(); } catch (e) {} }
     // Auto-fill the Park field with the full park name for the loaded park.

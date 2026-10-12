@@ -120,7 +120,7 @@
 <script src="modules/photo-sets.js?v=5" defer></script>
 <script src="modules/photo-autotag.js?v=5" defer></script>
 <script src="modules/photo-route-view.js?v=4" defer></script>
-<script src="modules/photo-report.js?v=26" defer></script>
+<script src="modules/photo-report.js?v=27" defer></script>
 <script src="modules/photo-dashboard.js?v=4" defer></script>
 
 <style>
@@ -31267,6 +31267,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       id:               g.id,
       _name:            g._name || null,
       _set:             g._set || null,
+      _relpath:         g._relpath || null,
       _hasOrig:         false,                 // originals never travel in the file
       dataUrl:          withBytes ? (g.dataUrl || null) : null,
       lat:              g.lat,
@@ -38251,6 +38252,10 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
               // Photo set this image belongs to (folder name), for RAM on/off.
               _set: setName || null,
               _name: (file && file.name) || null,
+              // Relative path from the picked folder (webkitdirectory imports),
+              // so a descriptions CSV can rebuild a full on-disk path. Empty for
+              // single-file / drag imports — fall back to set + name.
+              _relpath: (file && file.webkitRelativePath) || null,
               _hasOrig: true,   // a full-size original is kept in the originals store
             };
             PHOTOS.push(rec);
