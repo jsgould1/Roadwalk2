@@ -58,6 +58,75 @@
     return order.map(function (k) { return m[k]; });
   }
 
+  // Park (unit) code for a section key. Route/lot idents carry the park prefix,
+  // e.g. "WRBR-0010AZ" -> "WRBR", "lot:ABLI-P01" -> "ABLI". Falls back to the
+  // first 4 chars; UNASSIGNED has no park.
+  function parkCodeOf(key) {
+    if (!key || key === UNASSIGNED) return '';
+    var s = (key.indexOf('lot:') === 0) ? key.slice(4) : key;
+    var dash = s.indexOf('-');
+    return (dash > 0 ? s.slice(0, dash) : s.slice(0, 4)).toUpperCase();
+  }
+  function loadedParkCode() {
+    return (rip() && rip().state && rip().state.bundle && rip().state.bundle.park) || '';
+  }
+
+  // Selection of which section keys get printed (hierarchical by park in the UI).
+  // null = not initialised yet; defaults to the loaded park's sections on open.
+  var _sel = null, _selParkCtx = null;
+  function selectedSections(secs) {
+    return secs.filter(function (s) { return !_sel || _sel[s.key]; });
+  }
+
+  // Build the "Routes to print" tree (park → its routes/lots) in #pr-tree.
+  function renderTree() {
+    var host = $('pr-tree'); if (!host) return;
+    var secs = grouped(true);                 // only hearted sections can print
+    var loaded = loadedParkCode();
+    if (_sel === null) _sel = {};
+    var parks = {}, porder = [];
+    secs.forEach(function (s) {
+      var code = parkCodeOf(s.key) || '(untagged)';
+      if (!parks[code]) { parks[code] = { code: code, secs: [] }; porder.push(code); }
+      parks[code].secs.push(s);
+      // Default a newly-seen section to on only if it belongs to the loaded park
+      // (or, if nothing is loaded, select everything).
+      if (!(s.key in _sel)) _sel[s.key] = loaded ? (code === loaded) : true;
+    });
+    porder.sort(function (a, b) { if (a === '(untagged)') return 1; if (b === '(untagged)') return -1; return a < b ? -1 : 1; });
+    if (!porder.length) { host.innerHTML = '<div class="prt-h">Routes to print</div><div class="prt-empty">No hearted photos yet.</div>'; return; }
+    var html = '<div class="prt-h">Routes to print</div>';
+    porder.forEach(function (code) {
+      var pk = parks[code];
+      var selN = pk.secs.filter(function (s) { return _sel[s.key]; }).length;
+      var pname = (code === '(untagged)') ? 'Untagged' : (code + ' — ' + parkFullName(code));
+      html += '<div class="prt-park"><label><input type="checkbox" class="prt-pk" data-pk="' + esc(code) + '"' + (selN === pk.secs.length ? ' checked' : '') + '>' +
+        '<span>' + esc(pname) + '</span></label><div class="prt-routes">';
+      pk.secs.forEach(function (s) {
+        html += '<label><input type="checkbox" class="prt-rt" data-key="' + esc(s.key) + '"' + (_sel[s.key] ? ' checked' : '') + '>' +
+          '<span>' + esc(s.title) + ' <span class="prt-cnt">(' + s.photos.length + ')</span></span></label>';
+      });
+      html += '</div></div>';
+    });
+    host.innerHTML = html;
+    Array.prototype.forEach.call(host.querySelectorAll('.prt-pk'), function (cb) {
+      var pk = parks[cb.getAttribute('data-pk')];
+      var selN = pk.secs.filter(function (s) { return _sel[s.key]; }).length;
+      cb.indeterminate = selN > 0 && selN < pk.secs.length;
+      cb.addEventListener('change', function () { pk.secs.forEach(function (s) { _sel[s.key] = cb.checked; }); prRefresh(); });
+    });
+    Array.prototype.forEach.call(host.querySelectorAll('.prt-rt'), function (cb) {
+      cb.addEventListener('change', function () { _sel[cb.getAttribute('data-key')] = cb.checked; prRefresh(); });
+    });
+  }
+  function updateSelCount() {
+    if (!$('pr-count')) return;
+    var secs = grouped(true), sel = 0, total = 0;
+    secs.forEach(function (s) { total += s.photos.length; if (_sel && _sel[s.key]) sel += s.photos.length; });
+    $('pr-count').textContent = sel + ' of ' + total + ' hearted selected';
+  }
+  function prRefresh() { renderTree(); renderBuilder(); updateSelCount(); }
+
   function imageFor(id) {
     var ps = psets();
     if (ps && ps.imageFor) return ps.imageFor(id);
@@ -109,9 +178,12 @@
 
   // ---- PDF (print window) ----------------------------------------------------
   function generate() {
-    var secs = grouped(true);
+    var secs = selectedSections(grouped(true));
     var total = 0; secs.forEach(function (s) { total += s.photos.length; });
-    if (!total) { status('Heart at least one photo first.'); return; }
+    if (!total) {
+      status(grouped(true).length ? 'Select at least one route to print (left panel).' : 'Heart at least one photo first.');
+      return;
+    }
     status('Preparing ' + total + ' photo(s)…');
 
     // Fill STA/MP for photos tagged before station support (route geometry is
@@ -135,9 +207,13 @@
         var blackLogo = all[0], npsLogo = all[1], res = all[3];
         var img = {}; var missing = 0;
         res.forEach(function (r) { if (r.d) img[r.id] = r.d; else missing++; });
-        var code = (rip() && rip().state && rip().state.bundle && rip().state.bundle.park) || '';
-        var park = ($('pr-park') && $('pr-park').value) || _parkName || parkFullName(code) || code;
         var wmOn = !$('pr-wm') || $('pr-wm').checked;
+        // Each page's header park is derived from that section's own route/lot
+        // prefix, so a multi-park print labels every page correctly. The manual
+        // Park field only overrides when a single park is being printed.
+        var fieldVal = (($('pr-park') && $('pr-park').value) || '').trim();
+        var parkCodes = {}; secs.forEach(function (s) { parkCodes[parkCodeOf(s.key)] = 1; });
+        var singlePark = Object.keys(parkCodes).length === 1;
         // Prefer the official black AECOM logo; fall back to the app reverse logo, darkened.
         var aecomLogo = blackLogo || (document.querySelector('.aecom-logo') || {}).src || '';
         var aecomBlack = !!blackLogo;
@@ -146,6 +222,8 @@
           var usable = s.photos.filter(function (p) { return img[p.id]; });
           var pages = chunk6(usable);
           var routeId = (s.key === UNASSIGNED) ? 'Unassigned' : (s.key.indexOf('lot:') === 0 ? s.key.slice(4) : s.key);
+          var code2 = parkCodeOf(s.key);
+          var park = (singlePark && fieldVal) ? fieldVal : (parkFullName(code2) || fieldVal || _parkName || code2 || 'Field Photos');
           pages.forEach(function (pagePhotos, pi) {
             pagesHtml += pageHtml({ park: park, aecomLogo: aecomLogo, aecomBlack: aecomBlack, npsLogo: npsLogo,
               secTitle: s.title, routeId: routeId, pageIdx: pi + 1, pageCount: pages.length, photos: pagePhotos, img: img, wmOn: wmOn });
@@ -325,9 +403,11 @@
     var host = $('pr-body'); if (!host) return;
     var heartedOnly = $('pr-hearted') && $('pr-hearted').checked;
     var secs = grouped(heartedOnly);
-    var counts = 0; grouped(true).forEach(function (s) { counts += s.photos.length; });
-    if ($('pr-count')) $('pr-count').textContent = counts + ' hearted';
-    if (!secs.length) { host.innerHTML = '<div class="pr-empty">No photos' + (heartedOnly ? ' hearted yet' : ' yet') + '.</div>'; return; }
+    // In "hearted only" mode the list previews exactly what will print, so honour
+    // the park/route selection. With it off (hearting mode) show every section.
+    if (heartedOnly) secs = selectedSections(secs);
+    updateSelCount();
+    if (!secs.length) { host.innerHTML = '<div class="pr-empty">No photos' + (heartedOnly ? ' hearted/selected yet' : ' yet') + '.</div>'; return; }
 
     host.innerHTML = secs.map(function (s) {
       var cards = s.photos.map(function (p) {
@@ -350,7 +430,8 @@
       heart.addEventListener('click', function () {
         var on = !p.hearted; toggleHeart(p, on);
         heart.classList.toggle('on', on); heart.textContent = on ? '♥' : '♡';
-        if ($('pr-count')) { var c = 0; grouped(true).forEach(function (x) { c += x.photos.length; }); $('pr-count').textContent = c + ' hearted'; }
+        // Hearting may add a new route/park to the tree; keep it in sync.
+        renderTree(); updateSelCount();
         if (heartedOnly && !on) renderBuilder();
       });
       var cap = card.querySelector('.pr-cap');
@@ -371,7 +452,17 @@
       '#pr-top .t{font-weight:700;color:var(--blue,#0B3D66);font-size:15px}' +
       '#pr-top .sp{flex:1 1 auto}' +
       '#pr-park{font:600 13px system-ui;padding:5px 8px;border:1px solid var(--rule,#DDD7C8);border-radius:6px;min-width:200px}' +
-      '#pr-body{flex:1 1 auto;overflow:auto;padding:12px 16px}' +
+      '#pr-main{flex:1 1 auto;display:flex;min-height:0}' +
+      '#pr-tree{flex:0 0 250px;overflow:auto;border-right:1px solid var(--rule,#DDD7C8);padding:11px 12px;background:#fff}' +
+      '#pr-tree .prt-h{font:700 10.5px "IBM Plex Mono",monospace;color:#8a949f;letter-spacing:.07em;text-transform:uppercase;margin-bottom:9px}' +
+      '#pr-tree .prt-empty{color:var(--mute,#9BA0A8);font:500 12px system-ui}' +
+      '#pr-tree .prt-park{margin-bottom:7px}' +
+      '#pr-tree .prt-park>label{display:flex;align-items:center;gap:6px;font:700 12.5px system-ui;color:#12233b;cursor:pointer;padding:2px 0}' +
+      '#pr-tree .prt-routes{margin:1px 0 4px 21px;display:flex;flex-direction:column;gap:3px}' +
+      '#pr-tree .prt-routes label{display:flex;align-items:flex-start;gap:6px;font:500 12px system-ui;color:#33414f;cursor:pointer;line-height:1.25}' +
+      '#pr-tree input[type=checkbox]{margin:1px 0 0;flex:0 0 auto}' +
+      '#pr-tree .prt-cnt{color:#9BA0A8;font-weight:500}' +
+      '#pr-body{flex:1 1 auto;min-width:0;overflow:auto;padding:12px 16px}' +
       '.pr-empty{color:var(--mute,#9BA0A8);padding:30px;text-align:center}' +
       '.pr-sec{margin-bottom:16px}' +
       '.pr-sec-h{font:700 12.5px "IBM Plex Mono",monospace;color:var(--ink,#1A1D22);padding:6px 0;border-bottom:1px solid var(--rule,#DDD7C8);margin-bottom:8px}' +
@@ -406,7 +497,7 @@
             '<button class="pr-btn go" id="pr-go">Generate PDF</button>' +
             '<button class="pr-btn" id="pr-close">Close</button>' +
           '</div>' +
-          '<div id="pr-body"></div>' +
+          '<div id="pr-main"><div id="pr-tree"></div><div id="pr-body"></div></div>' +
         '</div>';
       document.body.appendChild(ov);
       ov.addEventListener('click', function (e) { if (e.target === ov) closeOverlay(); });
@@ -422,9 +513,14 @@
     if (window.RW2PhotoTag && window.RW2PhotoTag.ensureGeo) { try { window.RW2PhotoTag.ensureGeo(); } catch (e) {} }
     // Auto-fill the Park field with the full park name for the loaded park.
     var code = (rip() && rip().state && rip().state.bundle && rip().state.bundle.park) || '';
+    // If the loaded park changed since last open, re-default the route selection
+    // to that park (so opening the report for WRBR pre-selects WRBR, not ABLI).
+    if (_selParkCtx !== code) { _sel = null; _selParkCtx = code; }
     if (code) loadParkNames().then(function () {
       var pf = $('pr-park'); if (pf && (!pf.value || pf.value === code)) { pf.value = parkFullName(code); _parkName = pf.value; }
+      renderTree(); updateSelCount();
     });
+    renderTree();
     renderBuilder();
   }
   function closeOverlay() { var ov = $('pr-overlay'); if (ov) ov.classList.remove('on'); }
