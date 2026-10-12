@@ -286,7 +286,9 @@
   // Each photo prints full-width (its own row) or half-width (paired). Default
   // half. Pack an ordered list into rows accordingly; a trailing lone half keeps
   // half width (left-aligned).
-  function spanOf(p) { return (p.rip_rpt_span === 'full') ? 'full' : 'half'; }
+  // Default is FULL-WIDTH (stacked: full top / full bottom). Half is opt-in to
+  // place two photos side by side in one row.
+  function spanOf(p) { return (p.rip_rpt_span === 'half') ? 'half' : 'full'; }
   function packRows(photos) {
     var rows = [], pending = null;
     photos.forEach(function (p) {
