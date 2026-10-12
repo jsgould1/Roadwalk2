@@ -1315,6 +1315,7 @@
       + (state.tab === 'photos' ? '<button id="rip-print-pdf" title="Heart photos, add captions, and print a photo-report PDF" style="border:0;background:#C85A2B;color:#fff;border-radius:8px;padding:6px 12px;cursor:pointer;font:700 12.5px system-ui">🖨 Print Photo PDF</button>'
           + '<button id="rip-csv-out" title="Export a CSV of the photos shown (with file paths) to author descriptions" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 10px;cursor:pointer;font:600 12px system-ui;color:#12233b">⬇ Descr. CSV</button>'
           + '<label id="rip-csv-in-lbl" title="Import a CSV to apply descriptions to the matching photos" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 10px;cursor:pointer;font:600 12px system-ui;color:#12233b;display:inline-flex;align-items:center">⬆ Import CSV<input type="file" id="rip-csv-in" accept=".csv,text/csv" style="display:none"></label>'
+          + '<button id="rip-rubric-btn" title="Edit the description rubric (shipped with every exported CSV)" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 10px;cursor:pointer;font:600 12px system-ui;color:#12233b">✎ Rubric</button>'
           + photoParkSelectHtml()
           + '<label title="Show only hearted photos so you can review and trim the selection" style="display:inline-flex;align-items:center;gap:5px;font:600 12px system-ui;color:#12233b;border:1px solid ' + (state.photoHeartedOnly ? '#C85A2B' : '#d3dae1') + ';background:' + (state.photoHeartedOnly ? '#FBEDE6' : '#fff') + ';border-radius:8px;padding:5px 10px;cursor:pointer"><input type="checkbox" id="rip-photo-hearted"' + (state.photoHeartedOnly ? ' checked' : '') + ' style="margin:0;cursor:pointer"><span style="color:#C85A2B">♥</span> Hearted only</label>'
           + '<span style="font-size:12px;color:#8a949f">Size</span><select id="rip-photo-size" style="border:1px solid #d3dae1;border-radius:8px;padding:4px 7px;font:12.5px system-ui;background:#fff">'
@@ -1365,6 +1366,8 @@
       rd.onload = () => { if (window.RW2PhotoReport && window.RW2PhotoReport.importCsv) window.RW2PhotoReport.importCsv(String(rd.result || ''), () => render()); };
       rd.readAsText(f); this.value = '';
     };
+    const rubBtn = $('rip-rubric-btn');
+    if (rubBtn) rubBtn.onclick = () => { if (window.RW2PhotoReport && window.RW2PhotoReport.editRubric) window.RW2PhotoReport.editRubric(); };
 
     // Assets → Photos: jump to the Photos tab, focused on this route's section.
     host.querySelectorAll('[data-photos]').forEach((b) => b.onclick = (e) => {

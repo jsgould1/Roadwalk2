@@ -139,6 +139,55 @@
     if (p._relpath) return p._relpath;
     return (p._set ? p._set + '/' : '') + (p._name || '');
   }
+
+  // Editable description rubric (house style). Shipped at the top of every
+  // exported CSV as "# " comment lines so whoever authors the captions uses the
+  // team's current guidance. Edited in-app; stored per machine in localStorage.
+  var RUBRIC_DEFAULT = [
+    'Pavement photo caption style (edit to update for the team):',
+    '- Short: ~1-2 sentences or a tight phrase list. Technical pavement-engineer voice; vary the wording; do not use the word "centroid".',
+    '- Surface types: dense mix asphalt (HMA), Portland cement concrete (PCC), gravel, pervious pavers, chip seal (coarse/fine), microsurfacing, crackseal. Do not infer age from color.',
+    '- Distresses (name only what is visible, with low/med/high severity): edge drop-off, edge cracking, L&T (longitudinal & transverse) cracking, block cracking, alligator cracking, depressions, rutting, weathering, raveling. Flag existing and needed patching.',
+    '- Markings (use sparingly, only when notable/deficient): DYCL, SYCL, SWEL, SYEL.',
+    '- Features: traffic loops, gates, wheel stops, curbs/gutters, shoulders, speed bumps (good/fair/poor), sidewalks (note cracking), historic stone swales & monuments (flag when they need protection).',
+    '- Curbs: note type (stone/PCC/granite) and reveal - flag low reveal (<2"); ~5-6" is normal.',
+    '- Material caution: junction/pull boxes, wheel stops, and curbs may be various materials - do not state the material unless certain ("material unconfirmed").',
+    '- Signs: mention only if deficient (mildew buildup, bullet holes, bent/leaning, not meeting MUTCD).'
+  ].join('\n');
+  function getRubric() {
+    try { var v = localStorage.getItem('rw_report_rubric'); if (v != null) return v; } catch (e) {}
+    return RUBRIC_DEFAULT;
+  }
+  function setRubric(v) { try { localStorage.setItem('rw_report_rubric', v); } catch (e) {} }
+  function openRubricEditor() {
+    ensureStyles();
+    var ov = $('pr-rubric');
+    if (!ov) {
+      ov = document.createElement('div'); ov.id = 'pr-rubric';
+      ov.style.cssText = 'position:fixed;inset:0;z-index:4300;background:rgba(20,22,28,.55);display:none;align-items:center;justify-content:center';
+      ov.innerHTML =
+        '<div style="width:min(840px,94vw);max-height:90vh;background:var(--paper,#FBFAF6);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.45)">' +
+          '<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--rule,#DDD7C8);background:#fff">' +
+            '<span style="font-weight:800;color:#16315E;font-size:15px">✎ Description rubric</span>' +
+            '<span style="font:500 11.5px system-ui;color:#8a949f">Shipped at the top of every exported Descr. CSV</span>' +
+            '<span style="flex:1"></span><button class="pr-btn" id="pr-rub-reset">Reset to default</button></div>' +
+          '<textarea id="pr-rub-text" spellcheck="false" style="flex:1 1 auto;min-height:360px;margin:12px 16px;padding:10px 12px;border:1px solid var(--rule,#DDD7C8);border-radius:8px;font:500 12.5px/1.5 ui-monospace,Consolas,monospace;color:#1A1D22;resize:vertical"></textarea>' +
+          '<div style="display:flex;gap:10px;align-items:center;padding:11px 16px;border-top:1px solid var(--rule,#DDD7C8);background:#fff">' +
+            '<span id="pr-rub-status" style="font:500 11.5px system-ui;color:#0e7c66"></span><span style="flex:1"></span>' +
+            '<button class="pr-btn go" id="pr-rub-save">Save</button><button class="pr-btn" id="pr-rub-close">Close</button></div>' +
+        '</div>';
+      document.body.appendChild(ov);
+      ov.addEventListener('click', function (e) { if (e.target === ov) ov.style.display = 'none'; });
+      $('pr-rub-close').addEventListener('click', function () { ov.style.display = 'none'; });
+      $('pr-rub-reset').addEventListener('click', function () { $('pr-rub-text').value = RUBRIC_DEFAULT; });
+      $('pr-rub-save').addEventListener('click', function () {
+        setRubric($('pr-rub-text').value);
+        var s = $('pr-rub-status'); if (s) { s.textContent = 'Saved — rides along in the next exported CSV.'; setTimeout(function () { s.textContent = ''; }, 2600); }
+      });
+    }
+    $('pr-rub-text').value = getRubric();
+    ov.style.display = 'flex';
+  }
   var CSV_HEADER = ['photo_id', 'filename', 'set', 'park', 'route', 'sta', 'mp', 'lat', 'lng', 'file_path', 'description'];
   function csvRowFor(p, base) {
     var route = p.rip_route || (p.rip_lot ? 'lot:' + p.rip_lot : '');
@@ -158,7 +207,11 @@
   // the RIP Photos tab). base = the on-disk folder for the file_path column.
   function buildCsvForPhotos(photos, base) {
     base = (base || '').trim().replace(/[\\/]+$/, '');
-    var lines = [CSV_HEADER.map(csvCell).join(',')];
+    var lines = [];
+    // Ship the rubric as leading "# " comment lines (skipped on import; read by
+    // the captioner tool so it uses the team's current style).
+    getRubric().split(/\r?\n/).forEach(function (l) { lines.push('# ' + l); });
+    lines.push(CSV_HEADER.map(csvCell).join(','));
     (photos || []).forEach(function (p) { lines.push(csvRowFor(p, base)); });
     return lines.join('\r\n');
   }
@@ -190,6 +243,8 @@
   function parseCsv(text) {
     var rows = [], row = [], cell = '', i = 0, inQ = false, c;
     text = String(text).replace(/^﻿/, '');
+    // Strip leading "#" comment lines (the embedded rubric) before parsing.
+    text = text.replace(/^(?:#[^\r\n]*\r?\n)+/, '');
     while (i < text.length) {
       c = text[i];
       if (inQ) {
@@ -866,6 +921,7 @@
             '<input id="pr-photobase" placeholder="Photos base folder (for CSV file paths)" title="Absolute folder the photos were imported from — used to build file_path in the descriptions CSV" style="font:600 11.5px system-ui;padding:5px 8px;border:1px solid var(--rule,#DDD7C8);border-radius:6px;min-width:190px">' +
             '<button class="pr-btn" id="pr-csv-out" title="Export a CSV of the selected photos (with file paths) so descriptions can be authored externally">⬇ Descr. CSV</button>' +
             '<label class="pr-btn" id="pr-csv-in-lbl" title="Import a CSV to apply descriptions to the matching photos" style="cursor:pointer;display:inline-flex;align-items:center">⬆ Import CSV<input type="file" id="pr-csv-in" accept=".csv,text/csv" style="display:none"></label>' +
+            '<button class="pr-btn" id="pr-rubric-btn" title="Edit the description rubric (shipped with every exported CSV)">✎ Rubric</button>' +
             '<span id="pr-count" style="font:600 12px \'IBM Plex Mono\',monospace;color:var(--mute,#9BA0A8)">0 hearted</span>' +
             '<span class="sp"></span>' +
             '<span id="pr-status" style="font:500 11.5px system-ui;color:var(--mute,#9BA0A8)"></span>' +
@@ -891,6 +947,7 @@
       });
       var pb = $('pr-photobase');
       if (pb) pb.addEventListener('input', function () { try { localStorage.setItem('rw_report_photo_base', pb.value); } catch (e) {} });
+      var rbtn = $('pr-rubric-btn'); if (rbtn) rbtn.addEventListener('click', openRubricEditor);
       // Draggable divider between the routes tree and the photo grid.
       (function () {
         var split = $('pr-split'), tree = $('pr-tree'), dragging = false, startX = 0, startW = 0;
@@ -970,5 +1027,6 @@
     // Reusable description-CSV I/O for other tabs (e.g. RIP Photos):
     exportCsv: function (photos, base) { downloadCsvForPhotos(photos || [], (base != null ? base : reportBaseFolder())); },
     importCsv: function (text, onDone) { importDescriptionsCsv(text, onDone); },
+    editRubric: openRubricEditor,
   };
 })();

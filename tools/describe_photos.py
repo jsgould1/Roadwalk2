@@ -155,8 +155,8 @@ def notes_for(notes, row):
     return "  ".join(out)
 
 
-def caption_one(host, model, b64, route, sta, field_notes="", seed=""):
-    prompt = RUBRIC + "\nContext (reference only, do not restate verbatim): route {}, station {}.".format(
+def caption_one(host, model, b64, route, sta, field_notes="", seed="", rubric=RUBRIC):
+    prompt = (rubric or RUBRIC) + "\nContext (reference only, do not restate verbatim): route {}, station {}.".format(
         route or "n/a", sta or "n/a"
     )
     if field_notes:
@@ -192,6 +192,7 @@ def main():
     ap.add_argument("--out", help="Output CSV (default: <input>-filled.csv).")
     ap.add_argument("--base", default="", help="Folder the CSV file_path is relative to.")
     ap.add_argument("--notes", default="", help="Field-notes CSV (columns: id, surface, notes) to ground captions.")
+    ap.add_argument("--rubric", default="", help="Rubric text file. If omitted, the rubric embedded in the CSV (# lines) is used, else the built-in default.")
     ap.add_argument("--model", default="qwen2.5vl:7b", help="Ollama vision model.")
     ap.add_argument("--host", default="http://localhost:11434", help="Ollama base URL.")
     ap.add_argument("--overwrite", action="store_true", help="Re-caption rows that already have a description (ignores the old text).")
@@ -205,11 +206,35 @@ def main():
     out_path = args.out or (os.path.splitext(args.csv)[0] + "-filled.csv")
 
     with open(args.csv, "r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        fields = reader.fieldnames or []
-        rows = list(reader)
+        raw = f.read()
+    # Pull any embedded rubric off the top ("# " comment lines) and strip them.
+    embedded, body_lines = [], []
+    in_header = True
+    for ln in raw.splitlines():
+        if in_header and ln.lstrip().startswith("#"):
+            embedded.append(ln.lstrip()[1:].lstrip())
+        else:
+            in_header = False
+            body_lines.append(ln)
+    import io as _io
+    reader = csv.DictReader(_io.StringIO("\n".join(body_lines)))
+    fields = reader.fieldnames or []
+    rows = list(reader)
     if "description" not in fields:
         sys.exit('CSV has no "description" column.')
+
+    # Rubric: --rubric file wins, else embedded in the CSV, else built-in default.
+    rubric = RUBRIC
+    if args.rubric:
+        if not os.path.isfile(args.rubric):
+            sys.exit("Rubric file not found: " + args.rubric)
+        with open(args.rubric, "r", encoding="utf-8-sig") as f:
+            rubric = f.read().strip()
+        print("Using rubric from " + args.rubric)
+    elif embedded:
+        rubric = "\n".join(embedded).strip()
+        print("Using rubric embedded in the CSV ({} lines).".format(len(embedded)))
+
     notes = load_notes(args.notes)
     if notes:
         print("Loaded field notes for {} key(s).".format(len(notes)))
@@ -242,7 +267,7 @@ def main():
         try:
             b64 = encode_image(path, args.maxpx)
             seed = (r.get("description") or "").strip() if args.seed_context else ""
-            cap = caption_one(args.host, args.model, b64, r.get("route"), r.get("sta"), notes_for(notes, r), seed)
+            cap = caption_one(args.host, args.model, b64, r.get("route"), r.get("sta"), notes_for(notes, r), seed, rubric)
             if not cap:
                 raise RuntimeError("empty response")
             r["description"] = cap
@@ -258,6 +283,9 @@ def main():
             errors += 1
 
     with open(out_path, "w", encoding="utf-8", newline="") as f:
+        # keep the rubric at the top of the filled CSV (app import skips # lines)
+        for ln in rubric.split("\n"):
+            f.write("# " + ln + "\n")
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
