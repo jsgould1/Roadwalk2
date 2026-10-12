@@ -53,8 +53,8 @@
     order.sort(function (a, b) {
       if (a === UNASSIGNED) return 1; if (b === UNASSIGNED) return -1; return a < b ? -1 : 1;
     });
-    // chronological within a section
-    order.forEach(function (k) { m[k].photos.sort(function (x, y) { return String(x.ts || '') < String(y.ts || '') ? -1 : 1; }); });
+    // arranged order within a section (explicit drag order, else chronological)
+    order.forEach(function (k) { m[k].photos.sort(cmpOrder); });
     return order.map(function (k) { return m[k]; });
   }
 
@@ -176,20 +176,32 @@
   }
   function chunk6(arr) { var out = []; for (var i = 0; i < arr.length; i += 6) out.push(arr.slice(i, i + 6)); return out; }
 
-  // Group a page's 1..6 photos into visual rows (each row = 1 full-width photo
-  // or 2 side-by-side). Mirrors layoutFor, but as explicit rows so each row can
-  // own an image band (equal heights) + a caption band below it.
-  function rowsFor(ph) {
-    var n = ph.length;
-    switch (n) {
-      case 1: return [{ photos: [ph[0]], full: true }];
-      case 2: return [{ photos: [ph[0]], full: true }, { photos: [ph[1]], full: true }];
-      case 3: return [{ photos: [ph[0], ph[1]] }, { photos: [ph[2]], full: true }];
-      case 4: return [{ photos: [ph[0], ph[1]] }, { photos: [ph[2], ph[3]] }];
-      case 5: return [{ photos: [ph[0], ph[1]] }, { photos: [ph[2], ph[3]] }, { photos: [ph[4]], full: true }];
-      default: return [{ photos: [ph[0], ph[1]] }, { photos: [ph[2], ph[3]] }, { photos: [ph[4], ph[5]] }];
-    }
+  // Within-section print order: explicit drag order (rip_rpt_order) first, then
+  // chronological for anything not yet arranged.
+  function cmpOrder(x, y) {
+    var ox = (x.rip_rpt_order == null) ? Infinity : x.rip_rpt_order;
+    var oy = (y.rip_rpt_order == null) ? Infinity : y.rip_rpt_order;
+    if (ox !== oy) return ox - oy;
+    return String(x.ts || '') < String(y.ts || '') ? -1 : 1;
   }
+  // Each photo prints full-width (its own row) or half-width (paired). Default
+  // half. Pack an ordered list into rows accordingly; a trailing lone half keeps
+  // half width (left-aligned).
+  function spanOf(p) { return (p.rip_rpt_span === 'full') ? 'full' : 'half'; }
+  function packRows(photos) {
+    var rows = [], pending = null;
+    photos.forEach(function (p) {
+      if (spanOf(p) === 'full') {
+        if (pending) { rows.push({ photos: [pending], lone: true }); pending = null; }
+        rows.push({ photos: [p], full: true });
+      } else if (pending) {
+        rows.push({ photos: [pending, p] }); pending = null;
+      } else { pending = p; }
+    });
+    if (pending) rows.push({ photos: [pending], lone: true });
+    return rows;
+  }
+  function chunkArr(arr, size) { var out = []; for (var i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out; }
 
   // ---- PDF (print window) ----------------------------------------------------
   function generate() {
@@ -236,13 +248,14 @@
         var pagesHtml = '';
         secs.forEach(function (s) {
           var usable = s.photos.filter(function (p) { return img[p.id]; });
-          var pages = chunk6(usable);
+          // pack into span-aware rows (full = 1 row, half = paired), 3 rows/page
+          var pages = chunkArr(packRows(usable), 3);
           var routeId = (s.key === UNASSIGNED) ? 'Unassigned' : (s.key.indexOf('lot:') === 0 ? s.key.slice(4) : s.key);
           var code2 = parkCodeOf(s.key);
           var park = (singlePark && fieldVal) ? fieldVal : (parkFullName(code2) || fieldVal || _parkName || code2 || 'Field Photos');
-          pages.forEach(function (pagePhotos, pi) {
+          pages.forEach(function (pageRows, pi) {
             pagesHtml += pageHtml({ park: park, aecomLogo: aecomLogo, aecomBlack: aecomBlack, npsLogo: npsLogo,
-              secTitle: s.title, routeId: routeId, pageIdx: pi + 1, pageCount: pages.length, photos: pagePhotos, img: img, wmOn: wmOn, pageNums: pageNums });
+              secTitle: s.title, routeId: routeId, pageIdx: pi + 1, pageCount: pages.length, rows: pageRows, img: img, wmOn: wmOn, pageNums: pageNums });
           });
         });
         if (!pagesHtml) { status('No printable images (all offloaded with no stored copy?).'); return; }
@@ -334,15 +347,18 @@
     }
     // Each row owns an image band (both photos share one height, so a caption on
     // one photo shrinks BOTH equally) and, only when any photo in the row has a
-    // description, a caption band below with one centered cell per photo.
-    var cells = rowsFor(o.photos).map(function (row) {
+    // description, a caption band below with one centered cell per photo. Rows
+    // are pre-packed by span: full (1 photo spanning), half-pair (2), or a lone
+    // half (1 photo kept at half width).
+    var cells = (o.rows || []).map(function (row) {
       var imgs = row.photos.map(imgboxHtml).join('');
       var anyCap = row.photos.some(function (p) { return (p.description || '').trim(); });
       var caps = anyCap ? '<div class="prow-caps">' + row.photos.map(function (p) {
         var cap = (p.description || '').trim();
         return '<div class="cap">' + (cap ? esc(cap) : '') + '</div>';
       }).join('') + '</div>' : '';
-      return '<div class="prow' + (row.full ? ' full' : '') + '"><div class="prow-imgs">' + imgs + '</div>' + caps + '</div>';
+      var cls = 'prow' + (row.full ? ' full' : '') + (row.lone ? ' lone' : '');
+      return '<div class="' + cls + '"><div class="prow-imgs">' + imgs + '</div>' + caps + '</div>';
     }).join('');
     var npsHtml = o.npsLogo ? '<img class="nps-logo" src="' + o.npsLogo + '" alt="NPS">' : '';
     var aecomHtml = o.aecomLogo ? '<img class="ftr-logo' + (o.aecomBlack ? ' blk' : '') + '" src="' + o.aecomLogo + '" alt="AECOM">' : '<span class="ftr-aecom">AECOM</span>';
@@ -386,6 +402,10 @@
       '.prow{flex:1 1 0;display:flex;flex-direction:column;min-height:0}' +
       '.prow-imgs{flex:1 1 auto;display:flex;gap:0.16in;min-height:0}' +
       '.prow-imgs .imgbox{flex:1 1 0}' +
+      // a lone half-width photo stays half width (left), not stretched full
+      '.prow.lone .prow-imgs{justify-content:flex-start}' +
+      '.prow.lone .prow-imgs .imgbox{flex:0 0 calc(50% - 0.08in)}' +
+      '.prow.lone .prow-caps .cap{flex:0 0 calc(50% - 0.08in)}' +
       '.prow-caps{flex:0 0 auto;display:flex;gap:0.16in;padding-top:3px}' +
       '.prow-caps .cap{flex:1 1 0;min-width:0}' +
       // engineering look: white, thin border, photo fills the frame so the
@@ -437,15 +457,19 @@
     if (!secs.length) { host.innerHTML = '<div class="pr-empty">No photos' + (heartedOnly ? ' hearted/selected yet' : ' yet') + '.</div>'; return; }
 
     host.innerHTML = secs.map(function (s) {
-      var cards = s.photos.map(function (p) {
+      var cards = s.photos.map(function (p, i) {
+        var isFull = spanOf(p) === 'full';
         return '<div class="pr-card" data-id="' + esc(p.id) + '">' +
+          '<span class="pr-num" draggable="true" title="Print order #' + (i + 1) + ' — drag to reorder">' + (i + 1) + '</span>' +
           '<button class="pr-heart' + (p.hearted ? ' on' : '') + '" title="Include in report">' + (p.hearted ? '♥' : '♡') + '</button>' +
           '<div class="pr-thumb" data-img="' + esc(p.id) + '"></div>' +
+          '<button class="pr-span' + (isFull ? ' full' : '') + '" title="Full-width or half-width in the report">' + (isFull ? '◼ Full' : '▭ Half') + '</button>' +
           '<textarea class="pr-cap" rows="2" placeholder="Caption / description…">' + esc(p.description || '') + '</textarea>' +
           '</div>';
       }).join('');
       return '<div class="pr-sec"><div class="pr-sec-h">' + esc(s.title) +
-        ' <span class="pr-sec-n">' + s.photos.length + '</span></div>' +
+        ' <span class="pr-sec-n">' + s.photos.length + '</span>' +
+        '<span class="pr-sec-hint">drag # to reorder · Full/Half sets print size</span></div>' +
         '<div class="pr-grid">' + cards + '</div></div>';
     }).join('');
 
@@ -461,10 +485,48 @@
         renderTree(); updateSelCount();
         if (heartedOnly && !on) renderBuilder();
       });
+      var span = card.querySelector('.pr-span');
+      span.addEventListener('click', function () {
+        var next = (spanOf(p) === 'full') ? 'half' : 'full';
+        p.rip_rpt_span = next; try { geo().save(p); } catch (e) {}
+        span.classList.toggle('full', next === 'full');
+        span.textContent = next === 'full' ? '◼ Full' : '▭ Half';
+      });
       var cap = card.querySelector('.pr-cap');
       cap.addEventListener('input', function () { saveCaption(p, cap.value); });
       var thumb = card.querySelector('.pr-thumb');
       imageFor(id).then(function (d) { if (d) thumb.style.backgroundImage = 'url(' + d + ')'; else thumb.classList.add('pr-off'); });
+      // drag-to-reorder (handle = the number badge; reorder stays within section)
+      var handle = card.querySelector('.pr-num');
+      handle.addEventListener('dragstart', function (e) {
+        _dragGrid = card.parentNode; card.classList.add('pr-dragging');
+        if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', id); } catch (_) {} try { e.dataTransfer.setDragImage(card, 20, 20); } catch (_) {} }
+      });
+      handle.addEventListener('dragend', function () {
+        card.classList.remove('pr-dragging');
+        var grid = _dragGrid; _dragGrid = null;
+        if (grid) { persistCardOrder(grid); renderBuilder(); }
+      });
+      card.addEventListener('dragover', function (e) {
+        if (!_dragGrid || card.parentNode !== _dragGrid) return;
+        e.preventDefault();
+        var dragging = _dragGrid.querySelector('.pr-dragging');
+        if (!dragging || dragging === card) return;
+        var r = card.getBoundingClientRect();
+        var after = e.clientX > r.left + r.width / 2;
+        _dragGrid.insertBefore(dragging, after ? card.nextSibling : card);
+      });
+    });
+  }
+
+  // Read the current DOM order of a section's cards and stamp rip_rpt_order so
+  // the arrangement persists and drives both the builder and the PDF.
+  var _dragGrid = null;
+  function persistCardOrder(grid) {
+    var cards = Array.prototype.slice.call(grid.querySelectorAll('.pr-card'));
+    cards.forEach(function (c, i) {
+      var p = geo() && geo().get(c.getAttribute('data-id'));
+      if (p && p.rip_rpt_order !== i) { p.rip_rpt_order = i; try { geo().save(p); } catch (e) {} }
     });
   }
 
@@ -494,12 +556,18 @@
       '.pr-sec{margin-bottom:16px}' +
       '.pr-sec-h{font:700 12.5px "IBM Plex Mono",monospace;color:var(--ink,#1A1D22);padding:6px 0;border-bottom:1px solid var(--rule,#DDD7C8);margin-bottom:8px}' +
       '.pr-sec-n{color:var(--mute,#9BA0A8);font-weight:500}' +
+      '.pr-sec-hint{float:right;font:500 10.5px system-ui;color:#9BA0A8;letter-spacing:0}' +
       '.pr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}' +
       '.pr-card{position:relative;background:#fff;border:1px solid var(--rule,#DDD7C8);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:6px}' +
+      '.pr-card.pr-dragging{opacity:.4;outline:2px dashed var(--orange,#C85A2B)}' +
+      '.pr-num{position:absolute;top:8px;left:8px;z-index:3;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:#16315E;color:#fff;font:800 11px system-ui;line-height:20px;text-align:center;cursor:grab;box-shadow:0 1px 4px rgba(0,0,0,.3);user-select:none}' +
+      '.pr-num:active{cursor:grabbing}' +
       '.pr-thumb{height:110px;border-radius:5px;background:#ECE8DC center/cover no-repeat}' +
       '.pr-thumb.pr-off{background:#ECE8DC}' +
       '.pr-heart{position:absolute;top:9px;right:9px;z-index:2;width:28px;height:28px;border-radius:50%;border:none;background:rgba(255,255,255,.9);color:#C85A2B;font-size:16px;cursor:pointer;line-height:1;box-shadow:0 1px 4px rgba(0,0,0,.2)}' +
       '.pr-heart.on{background:#C85A2B;color:#fff}' +
+      '.pr-span{align-self:flex-start;font:700 10.5px system-ui;padding:3px 8px;border-radius:6px;border:1px solid var(--rule,#DDD7C8);background:#fff;color:#5b6673;cursor:pointer}' +
+      '.pr-span.full{background:#16315E;color:#fff;border-color:#16315E}' +
       '.pr-cap{font:500 11.5px system-ui;border:1px solid var(--rule,#DDD7C8);border-radius:5px;padding:4px 6px;resize:vertical;width:100%}' +
       '.pr-btn{font:600 12.5px system-ui;padding:6px 12px;border-radius:7px;border:1px solid var(--rule,#DDD7C8);background:#fff;cursor:pointer}' +
       '.pr-btn.go{background:var(--orange,#C85A2B);color:#fff;border-color:var(--orange,#C85A2B)}';
