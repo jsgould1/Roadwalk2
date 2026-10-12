@@ -159,6 +159,42 @@
     return RUBRIC_DEFAULT;
   }
   function setRubric(v) { try { localStorage.setItem('rw_report_rubric', v); } catch (e) {} }
+  // ── Rubric few-shot EXAMPLES ──────────────────────────────────────────────
+  // Approved captions promoted from the import review live in an EXAMPLES block
+  // appended to the rubric text, so they ride along in every exported CSV (the
+  // next captioning pass sees how the team actually phrases things) and stay
+  // visible/prunable in the ✎ Rubric editor. Human-curated, deduped, capped.
+  var RUBRIC_EX_MARK = 'EXAMPLES — approved captions (edit or delete freely):';
+  var RUBRIC_EX_MAX = 12;
+  function splitRubric(txt) {
+    txt = txt || '';
+    var idx = txt.indexOf(RUBRIC_EX_MARK);
+    if (idx < 0) return { rules: txt.replace(/\s+$/, ''), examples: [] };
+    var ex = txt.slice(idx + RUBRIC_EX_MARK.length).split(/\r?\n/)
+      .map(function (l) { return l.replace(/^\s*[•\-]\s?/, '').trim(); })
+      .filter(function (l) { return l; });
+    return { rules: txt.slice(0, idx).replace(/\s+$/, ''), examples: ex };
+  }
+  function composeRubric(rules, examples) {
+    var out = (rules || '').replace(/\s+$/, '');
+    if (examples && examples.length) {
+      out += '\n\n' + RUBRIC_EX_MARK + '\n' + examples.map(function (e) { return '• ' + e; }).join('\n');
+    }
+    return out;
+  }
+  function rubricExamples() { return splitRubric(getRubric()).examples; }
+  function addRubricExample(text) {
+    text = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!text) return { ok: false, reason: 'empty' };
+    var s = splitRubric(getRubric());
+    if (s.examples.some(function (e) { return e.toLowerCase() === text.toLowerCase(); })) {
+      return { ok: false, reason: 'dup', count: s.examples.length };
+    }
+    s.examples.push(text);
+    while (s.examples.length > RUBRIC_EX_MAX) s.examples.shift();  // drop oldest past the cap
+    setRubric(composeRubric(s.rules, s.examples));
+    return { ok: true, count: s.examples.length };
+  }
   function openRubricEditor() {
     ensureStyles();
     var ov = $('pr-rubric');
@@ -169,7 +205,7 @@
         '<div style="width:min(840px,94vw);max-height:90vh;background:var(--paper,#FBFAF6);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.45)">' +
           '<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--rule,#DDD7C8);background:#fff">' +
             '<span style="font-weight:800;color:#16315E;font-size:15px">✎ Description rubric</span>' +
-            '<span style="font:500 11.5px system-ui;color:#8a949f">Shipped at the top of every exported Descr. CSV</span>' +
+            '<span style="font:500 11.5px system-ui;color:#8a949f">Rides atop every exported CSV · approved captions you ★ in import land in the EXAMPLES section below (edit/prune freely)</span>' +
             '<span style="flex:1"></span><button class="pr-btn" id="pr-rub-reset">Reset to default</button></div>' +
           '<textarea id="pr-rub-text" spellcheck="false" style="flex:1 1 auto;min-height:360px;margin:12px 16px;padding:10px 12px;border:1px solid var(--rule,#DDD7C8);border-radius:8px;font:500 12.5px/1.5 ui-monospace,Consolas,monospace;color:#1A1D22;resize:vertical"></textarea>' +
           '<div style="display:flex;gap:10px;align-items:center;padding:11px 16px;border-top:1px solid var(--rule,#DDD7C8);background:#fff">' +
@@ -331,9 +367,23 @@
         '<div class="pr-cr-txt">' +
           '<div class="pr-cr-meta">' + esc(c.name || c.id) + (c.route ? ' · ' + esc(c.route) : '') + '</div>' +
           '<div class="pr-cr-old"><span class="lbl">Current</span>' + esc(c.old) + '</div>' +
-          '<div class="pr-cr-new"><span class="lbl">New</span>' + esc(c.neu) + '</div>' +
+          '<div class="pr-cr-new"><span class="lbl">New</span>' + esc(c.neu) +
+            '<button class="pr-cr-ex" title="Save this caption to the rubric examples — teaches future captioning">★ example</button></div>' +
         '</div></div>';
     }).join('');
+    // Promote an approved caption into the rubric's few-shot EXAMPLES block.
+    Array.prototype.forEach.call(body.querySelectorAll('.pr-cr-ex'), function (btn) {
+      btn.onclick = function () {
+        var row = btn.closest('.pr-cr-row'), id = row && row.getAttribute('data-id');
+        var c = conflicts.filter(function (x) { return x.id === id; })[0];
+        if (!c) return;
+        var r = addRubricExample(c.neu);
+        btn.disabled = true;
+        if (r.ok) { btn.textContent = '★ added (' + r.count + ')'; btn.classList.add('on'); }
+        else if (r.reason === 'dup') { btn.textContent = '✓ already an example'; btn.classList.add('on'); }
+        else { btn.disabled = false; }
+      };
+    });
     // lazy thumbnails
     Array.prototype.forEach.call(body.querySelectorAll('.pr-cr-thumb'), function (t) {
       imageFor(t.getAttribute('data-img')).then(function (d) { if (d) t.style.backgroundImage = 'url(' + d + ')'; });
@@ -913,6 +963,10 @@
       '.pr-cr-old,.pr-cr-new{font:500 12px system-ui;line-height:1.3;padding:3px 7px;border-radius:5px;margin-top:3px;white-space:pre-wrap;overflow-wrap:anywhere}' +
       '.pr-cr-old{background:#f3ecea;color:#9a5b4a;text-decoration:line-through}' +
       '.pr-cr-new{background:#e7f1ea;color:#1b6b4a}' +
+      '.pr-cr-ex{margin-left:8px;border:1px solid #cdb36b;background:#fdf6e3;color:#8a6d1d;border-radius:5px;font:700 10px system-ui;padding:2px 7px;cursor:pointer;vertical-align:middle;white-space:nowrap}' +
+      '.pr-cr-ex:hover{background:#f7edc9}' +
+      '.pr-cr-ex.on{background:#dfeee6;border-color:#9cc3ad;color:#1b6b4a;cursor:default}' +
+      '.pr-cr-ex:disabled{opacity:.92}' +
       '.pr-cr-old .lbl,.pr-cr-new .lbl{display:inline-block;font:800 9px system-ui;letter-spacing:.06em;text-transform:uppercase;margin-right:6px;opacity:.75;text-decoration:none}' +
       '.pr-cr-ftr{display:flex;align-items:center;gap:10px;padding:11px 16px;border-top:1px solid var(--rule,#DDD7C8);background:#fff}' +
       '.pr-cr-ftr .sp{flex:1 1 auto}' +
@@ -1047,5 +1101,6 @@
     exportCsv: function (photos, base) { downloadCsvForPhotos(photos || [], (base != null ? base : reportBaseFolder())); },
     importCsv: function (text, onDone) { importDescriptionsCsv(text, onDone); },
     editRubric: openRubricEditor,
+    addExample: addRubricExample, examples: rubricExamples,
   };
 })();
