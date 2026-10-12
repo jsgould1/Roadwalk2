@@ -55,18 +55,27 @@ except ImportError:
     sys.exit("Pillow is required:  pip install pillow")
 
 RUBRIC = (
-    "You are a pavement inspector writing a concise caption (1-3 sentences) for a "
-    "pavement condition photo report. Describe the pavement condition of the feature "
-    "at the CENTER of the image, which is the focus of the photo. Identify the surface "
-    "type (asphalt, chip seal / surface treatment, or concrete). Use Pavement Condition "
-    "Index (PCI) distress terminology where distress is visible: longitudinal cracking, "
-    "transverse cracking, alligator (fatigue) cracking, block cracking, edge cracking, "
-    "joint reflection cracking, raveling, weathering, bleeding, rutting, depression, "
-    "patching, potholes, lane/shoulder drop-off. Give an overall severity (low, medium, "
-    "or high) where distress is present. Note pavement markings/striping, curbs or "
-    "gutters, and shoulder condition if visible. Be factual and specific. Do NOT mention "
-    "people, vehicles, signs, weather, the sky, or the camera. Return only the caption "
-    "text with no preamble or quotation marks."
+    "You are a pavement engineer writing a concise caption (1-3 sentences) for a "
+    "pavement condition photo report. Describe the condition of the pavement that is the "
+    "focus of the photo (generally the surface in the foreground/center). Write in a "
+    "technical but readable voice, and VARY your sentence structure and wording from one "
+    "caption to the next -- do not follow a fixed template.\n"
+    "Surface type: a lighter, faint-toned, smoother, fine-textured surface is typically "
+    "dense-graded (hot-mix) asphalt; a darker, coarse, chip-textured surface is typically "
+    "a chip seal / surface treatment; also identify concrete where present. Do NOT infer "
+    "the age or newness of a pavement from its color or darkness.\n"
+    "Use Pavement Condition Index (PCI) distress terminology where distress is visible: "
+    "longitudinal cracking, transverse cracking, alligator (fatigue) cracking, block "
+    "cracking, edge cracking, joint reflection cracking, raveling, weathering, bleeding, "
+    "rutting, depression, patching, potholes, lane/shoulder drop-off. Give an overall "
+    "severity (low, medium, or high) where distress is present. Mention curbs, gutters, "
+    "or shoulder condition when relevant. Mention pavement markings or edge/center lines "
+    "only when they are a notable feature or clearly deficient -- do not note striping in "
+    "every caption.\n"
+    "If field notes are provided below, treat them as AUTHORITATIVE: use them to confirm "
+    "the surface type and known distresses, and prefer them over visual guesses. "
+    "Be factual and specific. Do NOT mention people, vehicles, signs, weather, the sky, "
+    "or the camera. Return only the caption text with no preamble or quotation marks."
 )
 
 
@@ -105,10 +114,47 @@ def encode_image(path, maxpx):
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def caption_one(host, model, b64, route, sta):
+def load_notes(path):
+    """Load a field-notes CSV into a dict keyed by lowercased id.
+    Columns: id (matches photo_id | filename | route | set/lot), optional
+    'surface', and 'notes' (free text). Rows with the same id are merged."""
+    notes = {}
+    if not path:
+        return notes
+    if not os.path.isfile(path):
+        sys.exit("Notes file not found: " + path)
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        for row in csv.DictReader(f):
+            low = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+            key = (low.get("id") or low.get("route") or low.get("lot") or "").lower()
+            if not key:
+                continue
+            surface, text = low.get("surface", ""), low.get("notes", "")
+            chunk = (("Surface (field-confirmed): " + surface + ". ") if surface else "") + text
+            if chunk.strip():
+                notes[key] = (notes.get(key, "") + " " + chunk).strip()
+    return notes
+
+
+def notes_for(notes, row):
+    """Gather field notes that apply to a photo, most specific first."""
+    if not notes:
+        return ""
+    out = []
+    for k in [row.get("photo_id"), row.get("filename"), row.get("route"),
+              row.get("lot"), row.get("set"), row.get("park")]:
+        k = (k or "").strip().lower()
+        if k and k in notes and notes[k] not in out:
+            out.append(notes[k])
+    return "  ".join(out)
+
+
+def caption_one(host, model, b64, route, sta, field_notes=""):
     prompt = RUBRIC + "\nContext (reference only, do not restate verbatim): route {}, station {}.".format(
         route or "n/a", sta or "n/a"
     )
+    if field_notes:
+        prompt += "\nField notes (AUTHORITATIVE):\n" + field_notes
     payload = {
         "model": model,
         "prompt": prompt,
@@ -136,6 +182,7 @@ def main():
     ap.add_argument("--csv", required=True, help="Input descriptions CSV (from RoadWalk2 export).")
     ap.add_argument("--out", help="Output CSV (default: <input>-filled.csv).")
     ap.add_argument("--base", default="", help="Folder the CSV file_path is relative to.")
+    ap.add_argument("--notes", default="", help="Field-notes CSV (columns: id, surface, notes) to ground captions.")
     ap.add_argument("--model", default="qwen2.5vl:7b", help="Ollama vision model.")
     ap.add_argument("--host", default="http://localhost:11434", help="Ollama base URL.")
     ap.add_argument("--overwrite", action="store_true", help="Re-caption rows that already have a description.")
@@ -153,6 +200,9 @@ def main():
         rows = list(reader)
     if "description" not in fields:
         sys.exit('CSV has no "description" column.')
+    notes = load_notes(args.notes)
+    if notes:
+        print("Loaded field notes for {} key(s).".format(len(notes)))
 
     # how many actually need a caption
     todo = [r for r in rows if args.overwrite or not (r.get("description") or "").strip()]
@@ -181,7 +231,7 @@ def main():
             continue
         try:
             b64 = encode_image(path, args.maxpx)
-            cap = caption_one(args.host, args.model, b64, r.get("route"), r.get("sta"))
+            cap = caption_one(args.host, args.model, b64, r.get("route"), r.get("sta"), notes_for(notes, r))
             if not cap:
                 raise RuntimeError("empty response")
             r["description"] = cap

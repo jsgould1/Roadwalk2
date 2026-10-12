@@ -379,6 +379,19 @@
     return rows;
   }
   function chunkArr(arr, size) { var out = []; for (var i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out; }
+  // A full-width photo spans TWO row units (taller, shown uncropped); a half
+  // pair / lone half spans one. Pack rows into pages of up to CAP row units.
+  function rowWeight(row) { return row.full ? 2 : 1; }
+  function paginateRows(rows, cap) {
+    var pages = [], cur = [], w = 0;
+    rows.forEach(function (row) {
+      var rw = rowWeight(row);
+      if (w + rw > cap && cur.length) { pages.push(cur); cur = []; w = 0; }
+      cur.push(row); w += rw;
+    });
+    if (cur.length) pages.push(cur);
+    return pages;
+  }
 
   // ---- PDF (print window) ----------------------------------------------------
   function generate() {
@@ -426,7 +439,7 @@
         secs.forEach(function (s) {
           var usable = s.photos.filter(function (p) { return img[p.id]; });
           // pack into span-aware rows (full = 1 row, half = paired), 3 rows/page
-          var pages = chunkArr(packRows(usable), 3);
+          var pages = paginateRows(packRows(usable), 3);
           var routeId = (s.key === UNASSIGNED) ? 'Unassigned' : (s.key.indexOf('lot:') === 0 ? s.key.slice(4) : s.key);
           var code2 = parkCodeOf(s.key);
           var park = (singlePark && fieldVal) ? fieldVal : (parkFullName(code2) || fieldVal || _parkName || code2 || 'Field Photos');
@@ -577,6 +590,7 @@
       // stack of equal-height rows; each row = an image band + optional caption band
       '.grid{flex:1 1 auto;display:flex;flex-direction:column;gap:0.16in;min-height:0}' +
       '.prow{flex:1 1 0;display:flex;flex-direction:column;min-height:0}' +
+      '.prow.full{flex:2 1 0}' +   // full-width photo = two row units tall
       '.prow-imgs{flex:1 1 auto;display:flex;gap:0.16in;min-height:0}' +
       '.prow-imgs .imgbox{flex:1 1 0}' +
       // a lone half-width photo stays half width (left), not stretched full
@@ -589,6 +603,8 @@
       // watermark sits across the bottom of the actual image
       '.imgbox{position:relative;min-height:0;min-width:0;overflow:hidden;border:0.75pt solid #9aa3ad;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
       '.imgbox img{width:100%;height:100%;object-fit:cover;display:block}' +
+      // full-width photos show the WHOLE image (no crop); keep aspect ratio
+      '.prow.full .imgbox img{object-fit:contain}' +
       // solid info bar across the bottom of the image
       '.wm{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,0.68);color:#fff;font:600 8px "IBM Plex Mono",monospace;letter-spacing:.2px;padding:4px 8px 5px;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
       '.wm div{line-height:1.45;white-space:pre}' +
