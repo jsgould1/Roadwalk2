@@ -149,12 +149,15 @@ def notes_for(notes, row):
     return "  ".join(out)
 
 
-def caption_one(host, model, b64, route, sta, field_notes=""):
+def caption_one(host, model, b64, route, sta, field_notes="", seed=""):
     prompt = RUBRIC + "\nContext (reference only, do not restate verbatim): route {}, station {}.".format(
         route or "n/a", sta or "n/a"
     )
     if field_notes:
         prompt += "\nField notes (AUTHORITATIVE):\n" + field_notes
+    if seed:
+        prompt += ("\nInspector seed note (AUTHORITATIVE -- the observation is correct; "
+                   "incorporate it and expand it into the final caption, do not contradict it):\n" + seed)
     payload = {
         "model": model,
         "prompt": prompt,
@@ -185,7 +188,8 @@ def main():
     ap.add_argument("--notes", default="", help="Field-notes CSV (columns: id, surface, notes) to ground captions.")
     ap.add_argument("--model", default="qwen2.5vl:7b", help="Ollama vision model.")
     ap.add_argument("--host", default="http://localhost:11434", help="Ollama base URL.")
-    ap.add_argument("--overwrite", action="store_true", help="Re-caption rows that already have a description.")
+    ap.add_argument("--overwrite", action="store_true", help="Re-caption rows that already have a description (ignores the old text).")
+    ap.add_argument("--seed-context", dest="seed_context", action="store_true", help="Use any existing description as an authoritative seed note and expand it into a full caption (blanks captioned normally).")
     ap.add_argument("--limit", type=int, default=0, help="Only process the first N rows needing a caption.")
     ap.add_argument("--maxpx", type=int, default=1280, help="Resize long edge before sending.")
     args = ap.parse_args()
@@ -205,7 +209,7 @@ def main():
         print("Loaded field notes for {} key(s).".format(len(notes)))
 
     # how many actually need a caption
-    todo = [r for r in rows if args.overwrite or not (r.get("description") or "").strip()]
+    todo = [r for r in rows if args.overwrite or args.seed_context or not (r.get("description") or "").strip()]
     if args.limit > 0:
         todo = todo[: args.limit]
     todo_ids = set(id(r) for r in todo)
@@ -231,7 +235,8 @@ def main():
             continue
         try:
             b64 = encode_image(path, args.maxpx)
-            cap = caption_one(args.host, args.model, b64, r.get("route"), r.get("sta"), notes_for(notes, r))
+            seed = (r.get("description") or "").strip() if args.seed_context else ""
+            cap = caption_one(args.host, args.model, b64, r.get("route"), r.get("sta"), notes_for(notes, r), seed)
             if not cap:
                 raise RuntimeError("empty response")
             r["description"] = cap
