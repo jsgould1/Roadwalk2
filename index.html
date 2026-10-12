@@ -37613,10 +37613,104 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       '<div class="gp-dot"></div>';
     return L.divIcon({ className: classes, html: html, iconSize: [44, 44], iconAnchor: [22, 22] });
   }
+  /* ===== hover grid: fan out overlapping photo markers into a thumbnail grid =====
+     When several photo markers sit on top of each other you can't click or hover
+     the one you want. Hovering any marker that has neighbours within RADIUS_PX
+     pops up a floating, clickable grid of all the stacked photos; click a tile to
+     open that photo's popup. A short close-delay lets you move onto the grid. */
+  var _hgEl = null, _hgHideT = null, _hgOver = false, _hgWired = false;
+  var HG_RADIUS_PX = 30, HG_MAX_TILES = 36;
+  function _hgEnsure() {
+    if (_hgEl) return _hgEl;
+    var st = document.createElement('style');
+    st.textContent =
+      '.gp-hovergrid{position:fixed;z-index:100001;display:none;background:#fff;border:1px solid #c7ccd2;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.33);padding:8px}' +
+      '.gp-hg-head{font:600 11px system-ui;color:#0B3D66;margin-bottom:6px}' +
+      '.gp-hg-grid{display:grid;grid-template-columns:repeat(auto-fill,64px);gap:6px;max-height:258px;overflow:auto}' +
+      '.gp-hg-tile{width:64px;height:64px;border-radius:7px;border:1px solid #e3e8ee;background:#f4f1e8 center/cover no-repeat;cursor:pointer;padding:0;position:relative;font-size:20px;color:#9BA0A8;display:flex;align-items:center;justify-content:center}' +
+      '.gp-hg-tile.hearted{box-shadow:0 0 0 2px #C85A2B;border-color:#C85A2B}' +
+      '.gp-hg-tile:hover{outline:2px solid #0B3D66;outline-offset:1px}' +
+      '.gp-hg-more{font:500 10.5px system-ui;color:#8a949f;margin-top:5px;text-align:center}';
+    document.head.appendChild(st);
+    _hgEl = document.createElement('div');
+    _hgEl.className = 'gp-hovergrid';
+    _hgEl.addEventListener('mouseenter', function () { _hgOver = true; if (_hgHideT) { clearTimeout(_hgHideT); _hgHideT = null; } });
+    _hgEl.addEventListener('mouseleave', function () { _hgOver = false; _hgScheduleHide(); });
+    document.body.appendChild(_hgEl);
+    var map = rwMap();
+    if (map && !_hgWired) { _hgWired = true; map.on('movestart zoomstart', _hgHide); }
+    return _hgEl;
+  }
+  function _hgScheduleHide() { if (_hgHideT) clearTimeout(_hgHideT); _hgHideT = setTimeout(function () { if (!_hgOver) _hgHide(); }, 280); }
+  function _hgHide() { if (_hgHideT) { clearTimeout(_hgHideT); _hgHideT = null; } if (_hgEl) _hgEl.style.display = 'none'; }
+  function _hgMarkersNear(hoverMarker) {
+    var map = rwMap(); if (!map) return [];
+    var origin = map.latLngToContainerPoint(hoverMarker.getLatLng());
+    var out = [];
+    photoLayer.eachLayer(function (mk) {
+      if (!mk._gpPhotoId) return;
+      var pt = map.latLngToContainerPoint(mk.getLatLng());
+      var dx = pt.x - origin.x, dy = pt.y - origin.y;
+      if (dx * dx + dy * dy <= HG_RADIUS_PX * HG_RADIUS_PX) out.push(mk);
+    });
+    return out;
+  }
+  function _hgMarkerById(id) {
+    var found = null;
+    photoLayer.eachLayer(function (mk) { if (mk._gpPhotoId === id) found = mk; });
+    return found;
+  }
+  function _hgShow(hoverMarker) {
+    if (_groupingFrom) return;                 // grouping mode owns marker clicks
+    var markers = _hgMarkersNear(hoverMarker);
+    if (markers.length < 2) { _hgHide(); return; }   // nothing stacked here
+    try { hoverMarker.closeTooltip(); } catch (e) {}
+    var map = rwMap();
+    var byId = {}; PHOTOS.forEach(function (p) { byId[p.id] = p; });
+    _hgEnsure();
+    var shown = markers.slice(0, HG_MAX_TILES);
+    var tiles = shown.map(function (mk) {
+      var p = byId[mk._gpPhotoId]; if (!p) return '';
+      var src = p.dataUrl || '';
+      return '<button class="gp-hg-tile' + (p.hearted ? ' hearted' : '') + '" data-gid="' + escapeHtml(p.id) + '"' +
+        (src ? ' style="background-image:url(' + src + ')"' : ' data-off="1"') +
+        ' title="' + escapeHtml(p._name || '') + '">' + (src ? '' : '☁') + '</button>';
+    }).join('');
+    _hgEl.innerHTML = '<div class="gp-hg-head">' + markers.length + ' photos here · click to open</div>' +
+      '<div class="gp-hg-grid">' + tiles + '</div>' +
+      (markers.length > HG_MAX_TILES ? '<div class="gp-hg-more">+' + (markers.length - HG_MAX_TILES) + ' more</div>' : '');
+    _hgEl.style.display = 'block';
+    Array.prototype.forEach.call(_hgEl.querySelectorAll('.gp-hg-tile'), function (b) {
+      var id = b.getAttribute('data-gid');
+      b.onclick = function () {
+        var mk = _hgMarkerById(id); _hgHide();
+        if (mk) { try { map.setView(mk.getLatLng()); } catch (e) {} try { mk.openPopup(); } catch (e) {} }
+      };
+      // Offloaded photos have no in-RAM thumb — fetch it from the blob store.
+      if (b.getAttribute('data-off') && window.RW2PhotoSets && window.RW2PhotoSets.imageFor) {
+        window.RW2PhotoSets.imageFor(id).then(function (url) {
+          if (url) { b.style.backgroundImage = 'url(' + url + ')'; b.textContent = ''; b.removeAttribute('data-off'); }
+        }).catch(function () {});
+      }
+    });
+    // Position next to the cluster point, clamped to the viewport.
+    var pt = map.latLngToContainerPoint(hoverMarker.getLatLng());
+    var crect = map.getContainer().getBoundingClientRect();
+    var cx = crect.left + pt.x, cy = crect.top + pt.y;
+    var w = _hgEl.offsetWidth || 300, h = _hgEl.offsetHeight || 200, pad = 16;
+    var x = cx + pad, y = cy + pad;
+    if (x + w > window.innerWidth - 8) x = cx - pad - w;
+    if (x < 8) x = 8;
+    if (y + h > window.innerHeight - 8) y = window.innerHeight - 8 - h;
+    if (y < 8) y = 8;
+    _hgEl.style.left = x + 'px'; _hgEl.style.top = y + 'px';
+  }
+
   function render() {
     var map = rwMap();
     if (!map || !window.L) return;
     if (!photoLayer) photoLayer = L.layerGroup();
+    _hgHide();
     photoLayer.clearLayers();
     _groupingMarkers = [];
     if (!photosVisible) {
@@ -37675,6 +37769,9 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         p.lat = ll.lat; p.lng = ll.lng;
         dbPut(p).then(function () { render(); });
       });
+      // Hover → if this marker has stacked neighbours, show the thumbnail grid.
+      m.on('mouseover', function () { _hgShow(m); });
+      m.on('mouseout', function () { _hgScheduleHide(); });
       photoLayer.addLayer(m);
     });
   }
