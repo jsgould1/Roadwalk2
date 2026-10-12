@@ -10,7 +10,7 @@
    ---------------------------------------------------------------- */
 'use strict';
 
-var CACHE_VERSION = 'roadwalk2-v1';   // namespaced (shares github.io origin w/ legacy RoadWalk SW)
+var CACHE_VERSION = 'roadwalk2-v2';   // namespaced (shares github.io origin w/ legacy RoadWalk SW)
 
 // Pre-cached on install so the app opens even on a fully cold start.
 var PRECACHE = ['./', './index.html'];
@@ -50,9 +50,30 @@ self.addEventListener('fetch', function (e) {
   // "Reload from published data" always reaches the network for fresh data.
   if (url.search.indexOf('reload=') !== -1) return;
 
-  // Stale-while-revalidate: serve the cached copy instantly, refresh it in the
-  // background; fall back to the network (then the cached app shell) when the
-  // request is not yet cached.
+  // App-shell navigations: network-first. A new deploy ships a fresh index.html
+  // (and the versioned ?v= module URLs it references), so trying the network
+  // first means updates land on the FIRST reload instead of lagging a load
+  // behind under stale-while-revalidate. Falls back to the cached shell offline.
+  if (req.mode === 'navigate') {
+    e.respondWith(
+      fetch(req).then(function (res) {
+        if (res && res.ok) {
+          var copy = res.clone();
+          caches.open(CACHE_VERSION).then(function (c) { c.put(req, copy); });
+        }
+        return res;
+      }).catch(function () {
+        return caches.match(req).then(function (c) { return c || caches.match('./index.html'); });
+      })
+    );
+    return;
+  }
+
+  // Other assets: stale-while-revalidate — serve the cached copy instantly,
+  // refresh it in the background; fall back to the network (then the cached app
+  // shell) when the request is not yet cached. Versioned ?v= URLs make each
+  // deploy a fresh cache key, so this never serves a stale module after the new
+  // index.html (fetched network-first above) references it.
   e.respondWith(
     caches.match(req).then(function (cached) {
       var network = fetch(req).then(function (res) {
