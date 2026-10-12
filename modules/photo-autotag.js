@@ -25,6 +25,13 @@
 (function () {
   'use strict';
 
+  // Park (unit) code from a route/lot ident: "WRBR-0010AZ" -> "WRBR".
+  function parkCodeOf(ident) {
+    if (!ident) return '';
+    var dash = String(ident).indexOf('-');
+    return (dash > 0 ? ident.slice(0, dash) : String(ident).slice(0, 4)).toUpperCase();
+  }
+
   // ---- geo helpers (lifted from RoadWalk 3 js/geo.js, proven correct) -------
   var FT_PER_DEG_LAT = 364320;
   function ftPerDegLng(lat) { return FT_PER_DEG_LAT * Math.cos(lat * Math.PI / 180); }
@@ -301,6 +308,12 @@
         } else {
           p.rip_lot = ''; p.rip_lot_name = ''; p.rip_lot_fmss = ''; p.rip_lot_inside = false;
         }
+
+        // Refine the photo's park (unit code) from whatever it tagged to — the
+        // route/lot ident carries the prefix (WRBR-0010AZ -> WRBR). If it tagged
+        // to nothing, keep any park already stamped at import.
+        var parkFromTag = parkCodeOf(near.length ? near[0].ident : (lots.length ? lots[0].ident : ''));
+        if (parkFromTag) p.rip_park = parkFromTag;
 
         p.rip_tag_ft = maxFt;
         if (near.length || lots.length || had) changed.push(p);

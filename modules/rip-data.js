@@ -145,6 +145,7 @@
     tab: 'assets', metric: 'PCR', limit: PAGE,
     photoSize: (function () { try { return localStorage.getItem('rw_rip_photo_size') || 'med'; } catch (e) { return 'med'; } })(),
     photoHeartedOnly: (function () { try { return localStorage.getItem('rw_rip_photo_hearted') === '1'; } catch (e) { return false; } })(),
+    photoPark: (function () { try { return localStorage.getItem('rw_rip_photo_park') || '__cur__'; } catch (e) { return '__cur__'; } })(),
     sort: { key: 'ROUTE_IDENT', dir: 1 },
     q: '', kind: 'all', scope: 'all', facets: {}, range: { min: '', max: '' },
     cols: { assets: DEFAULT_COLS.assets.slice(), conditions: DEFAULT_COLS.conditions.slice() },
@@ -740,13 +741,52 @@
 
   // ---- Photos tab: field photos grouped by the section (route/lot) they were
   //      auto-tagged to (photo-autotag writes p.rip_route / p.rip_lot). -------
+  // Park (unit) code for a photo: the stamp set at import/tag, else derived from
+  // its route/lot ident prefix. '' when it can't be attributed to a park.
+  function parkCodeFromIdent(ident) {
+    if (!ident) return '';
+    const dash = String(ident).indexOf('-');
+    return (dash > 0 ? ident.slice(0, dash) : String(ident).slice(0, 4)).toUpperCase();
+  }
+  function photoParkOf(p) {
+    return (p.rip_park || parkCodeFromIdent(p.rip_route) || parkCodeFromIdent(p.rip_lot) || '').toUpperCase();
+  }
+  // Toolbar <select> to scope the Photos tab by park.
+  function photoParkSelectHtml() {
+    const api = window._RW && window._RW.geophotos;
+    const list = (api && api.list) ? api.list() : [];
+    const cur = (state.park || '').toUpperCase();
+    const set = {}; let noneN = 0;
+    list.forEach((p) => { const c = photoParkOf(p); if (c) set[c] = (set[c] || 0) + 1; else noneN++; });
+    const parks = Object.keys(set).sort();
+    const sel = state.photoPark || '__cur__';
+    let opts = '';
+    if (cur) opts += '<option value="__cur__"' + (sel === '__cur__' ? ' selected' : '') + '>This park (' + esc(cur) + ')</option>';
+    opts += '<option value="__all__"' + (sel === '__all__' ? ' selected' : '') + '>All parks (' + list.length + ')</option>';
+    parks.forEach((c) => { opts += '<option value="' + esc(c) + '"' + (sel === c ? ' selected' : '') + '>' + esc(c) + ' (' + set[c] + ')</option>'; });
+    if (noneN) opts += '<option value="__none__"' + (sel === '__none__' ? ' selected' : '') + '>No park (' + noneN + ')</option>';
+    return '<span style="font-size:12px;color:#8a949f">Park</span><select id="rip-photo-park" title="Scope photos to a park" style="border:1px solid #d3dae1;border-radius:8px;padding:4px 7px;font:12.5px system-ui;background:#fff">' + opts + '</select>';
+  }
+
   function photosTable() {
     const api = window._RW && window._RW.geophotos;
     if (!api || !api.list) return { html: '<div style="padding:40px;text-align:center;color:#8a949f">Field photos module not loaded.</div>' };
     const all = api.list();
     if (!all.length) return { html: '<div style="padding:40px;text-align:center;color:#8a949f">No field photos yet. Import photos, then use <b>Tag photos to routes</b> in the Photo Triage module.</div>' };
-    const photos = state.photoHeartedOnly ? all.filter((p) => p.hearted) : all;
-    if (!photos.length) return { html: '<div style="padding:40px;text-align:center;color:#8a949f">No hearted photos yet. Uncheck <b>Hearted only</b> or heart some photos (♥) to include them in the report.</div>' };
+    let photos = state.photoHeartedOnly ? all.filter((p) => p.hearted) : all;
+    // Park scope: default to the loaded park so photos from other parks (incl.
+    // offloaded/untagged ones) don't bleed in. '__all__' shows everything,
+    // '__none__' shows photos not attributable to any park, else an exact code.
+    const curPark = (state.park || '').toUpperCase();
+    const pf = state.photoPark || '__cur__';
+    if (pf === '__cur__') { if (curPark) photos = photos.filter((p) => photoParkOf(p) === curPark); }
+    else if (pf === '__none__') photos = photos.filter((p) => !photoParkOf(p));
+    else if (pf !== '__all__') photos = photos.filter((p) => photoParkOf(p) === pf);
+    if (!photos.length) {
+      const why = state.photoHeartedOnly ? 'No hearted photos' : 'No photos';
+      const scope = (pf === '__cur__' && curPark) ? ' for ' + curPark : (pf === '__none__' ? ' without a park' : (pf !== '__all__' ? ' for ' + pf : ''));
+      return { html: '<div style="padding:40px;text-align:center;color:#8a949f">' + why + scope + '. Try a different <b>Park</b> or <b>Hearted only</b> setting.</div>' };
+    }
 
     // group by the PRIMARY feature: being inside a lot wins over proximity to a
     // road; otherwise road wins; otherwise a nearby lot; else Unassigned.
@@ -1265,6 +1305,7 @@
       + ((state.tab === 'assets' || state.tab === 'conditions') ? '<button id="rip-cols-btn" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">Columns ▾</button>' : '')
       + (state.tab !== 'custom' && state.tab !== 'photos' ? '<button id="rip-csv" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">⬇ CSV</button>' : '')
       + (state.tab === 'photos' ? '<button id="rip-print-pdf" title="Heart photos, add captions, and print a photo-report PDF" style="border:0;background:#C85A2B;color:#fff;border-radius:8px;padding:6px 12px;cursor:pointer;font:700 12.5px system-ui">🖨 Print Photo PDF</button>'
+          + photoParkSelectHtml()
           + '<label title="Show only hearted photos so you can review and trim the selection" style="display:inline-flex;align-items:center;gap:5px;font:600 12px system-ui;color:#12233b;border:1px solid ' + (state.photoHeartedOnly ? '#C85A2B' : '#d3dae1') + ';background:' + (state.photoHeartedOnly ? '#FBEDE6' : '#fff') + ';border-radius:8px;padding:5px 10px;cursor:pointer"><input type="checkbox" id="rip-photo-hearted"' + (state.photoHeartedOnly ? ' checked' : '') + ' style="margin:0;cursor:pointer"><span style="color:#C85A2B">♥</span> Hearted only</label>'
           + '<span style="font-size:12px;color:#8a949f">Size</span><select id="rip-photo-size" style="border:1px solid #d3dae1;border-radius:8px;padding:4px 7px;font:12.5px system-ui;background:#fff">'
           + [['small', 'Small'], ['med', 'Medium'], ['lg', 'Large'], ['xl', 'X-Large'], ['xxl', 'XX-Large']].map((o) => '<option value="' + o[0] + '"' + (state.photoSize === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('')
@@ -1299,6 +1340,8 @@
     if (psz) psz.onchange = () => { state.photoSize = psz.value; try { localStorage.setItem('rw_rip_photo_size', psz.value); } catch (e) {} render(); };
     const phh = $('rip-photo-hearted');
     if (phh) phh.onchange = () => { state.photoHeartedOnly = phh.checked; try { localStorage.setItem('rw_rip_photo_hearted', phh.checked ? '1' : '0'); } catch (e) {} render(); };
+    const ppk = $('rip-photo-park');
+    if (ppk) ppk.onchange = () => { state.photoPark = ppk.value; try { localStorage.setItem('rw_rip_photo_park', ppk.value); } catch (e) {} render(); };
 
     // Assets → Photos: jump to the Photos tab, focused on this route's section.
     host.querySelectorAll('[data-photos]').forEach((b) => b.onclick = (e) => {

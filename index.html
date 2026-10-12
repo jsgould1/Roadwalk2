@@ -101,7 +101,7 @@
 <script src="modules/library.js" defer></script>
 <script src="modules/route-tools.js" defer></script>
 <script src="modules/aecom-toggle.js?v=2" defer></script>
-<script src="modules/rip-data.js?v=25" defer></script>
+<script src="modules/rip-data.js?v=26" defer></script>
 <script src="modules/rip-import.js?v=2" defer></script>
 <script src="modules/rip-map.js?v=14" defer></script>
 <script src="modules/rip-pathweb.js?v=2" defer></script>
@@ -118,7 +118,7 @@
 <script src="modules/map-tools.js?v=4" defer></script>
 <script src="modules/flip-sta.js" defer></script>
 <script src="modules/photo-sets.js?v=5" defer></script>
-<script src="modules/photo-autotag.js?v=4" defer></script>
+<script src="modules/photo-autotag.js?v=5" defer></script>
 <script src="modules/photo-route-view.js?v=4" defer></script>
 <script src="modules/photo-report.js?v=22" defer></script>
 <script src="modules/photo-dashboard.js?v=4" defer></script>
@@ -38223,6 +38223,10 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
               description: '',
               // Original capture time from EXIF when available, else import time.
               ts: (capTime || new Date()).toISOString(),
+              // Park (unit code) this photo was collected under — the RIP park
+              // loaded at import time. Lets the Photos tab scope by park even for
+              // untagged photos. Tagging later refines it from the route/lot ident.
+              rip_park: (window.RW2RIP && window.RW2RIP.state && window.RW2RIP.state.bundle && window.RW2RIP.state.bundle.park) || '',
               // Photo set this image belongs to (folder name), for RAM on/off.
               _set: setName || null,
               _name: (file && file.name) || null,
