@@ -188,19 +188,22 @@
     $('pr-rub-text').value = getRubric();
     ov.style.display = 'flex';
   }
-  var CSV_HEADER = ['photo_id', 'filename', 'set', 'park', 'route', 'sta', 'mp', 'lat', 'lng', 'file_path', 'description'];
+  // hearted = TRUE/FALSE flag; original_description preserves the current text so
+  // a new/expanded caption can be built in the editable `description` column.
+  var CSV_HEADER = ['photo_id', 'filename', 'set', 'park', 'route', 'sta', 'mp', 'lat', 'lng', 'file_path', 'hearted', 'original_description', 'description'];
   function csvRowFor(p, base) {
     var route = p.rip_route || (p.rip_lot ? 'lot:' + p.rip_lot : '');
     var code = (p.rip_park || parkCodeOf(route) || '').toUpperCase();
     var rel = photoRelPath(p);
     var full = base ? (base + '\\' + rel.replace(/\//g, '\\')) : rel;
+    var desc = p.description || '';
     return [
       p.id, p._name || '', p._set || '', code, route,
       (p.rip_route_sta != null ? fmtSta(p.rip_route_sta) : ''),
       (p.rip_route_mp != null ? p.rip_route_mp : ''),
       (isFinite(Number(p.lat)) ? Number(p.lat).toFixed(6) : ''),
       (isFinite(Number(p.lng)) ? Number(p.lng).toFixed(6) : ''),
-      full, p.description || ''
+      full, (p.hearted ? 'TRUE' : 'FALSE'), desc, desc
     ].map(csvCell).join(',');
   }
   // Build the CSV for ANY list of photos (used by the report selection and by
