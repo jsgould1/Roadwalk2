@@ -306,6 +306,7 @@
   // automatically and are reported in the footer.
   function openCsvReview(conflicts, info, onDone) {
     onDone = onDone || function () {};
+    ensureStyles();   // dialog may open from the RIP/File tab with the builder closed
     var ov = $('pr-csvreview');
     if (!ov) {
       ov = document.createElement('div'); ov.id = 'pr-csvreview';
@@ -698,7 +699,19 @@
   }
 
   // ---- builder overlay -------------------------------------------------------
-  function status(msg) { var el = $('pr-status'); if (el) el.textContent = msg || ''; }
+  function status(msg) {
+    var el = $('pr-status'); if (el) { el.textContent = msg || ''; return; }
+    // Builder overlay closed (e.g. import triggered from the RIP Photos or
+    // File tab): fall back to a transient toast so feedback is never lost.
+    if (!msg) return;
+    try {
+      ensureStyles();
+      var t = $('pr-toast');
+      if (!t) { t = document.createElement('div'); t.id = 'pr-toast'; document.body.appendChild(t); }
+      t.textContent = msg; t.className = 'on';
+      clearTimeout(status._t); status._t = setTimeout(function () { t.className = ''; }, 4200);
+    } catch (e) {}
+  }
 
   var _capTimer = null;
   function saveCaption(p, val) {
@@ -903,7 +916,10 @@
       '.pr-cr-old .lbl,.pr-cr-new .lbl{display:inline-block;font:800 9px system-ui;letter-spacing:.06em;text-transform:uppercase;margin-right:6px;opacity:.75;text-decoration:none}' +
       '.pr-cr-ftr{display:flex;align-items:center;gap:10px;padding:11px 16px;border-top:1px solid var(--rule,#DDD7C8);background:#fff}' +
       '.pr-cr-ftr .sp{flex:1 1 auto}' +
-      '.pr-cr-ftr #pr-cr-status{font:500 11.5px system-ui;color:#8a949f}';
+      '.pr-cr-ftr #pr-cr-status{font:500 11.5px system-ui;color:#8a949f}' +
+      // Toast: feedback when the builder is closed (import from RIP/File tab).
+      '#pr-toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(8px);z-index:4400;max-width:min(560px,92vw);background:#16315E;color:#fff;font:600 12.5px/1.45 system-ui;padding:10px 16px;border-radius:9px;box-shadow:0 10px 34px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .18s,transform .18s}' +
+      '#pr-toast.on{opacity:1;transform:translateX(-50%) translateY(0)}';
     document.head.appendChild(st);
   }
 

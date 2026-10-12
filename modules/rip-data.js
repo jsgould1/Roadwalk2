@@ -844,8 +844,9 @@
           + '<button data-rip-save="' + esc(p.id) + '" title="Save / download image" style="' + BTN + ';background:rgba(255,255,255,.92);color:#0B3D66">⤓</button>'
           + '<button data-rip-fly="' + esc(p.id) + '" title="Fly to this photo on the map" style="' + BTN + ';background:rgba(255,255,255,.92);color:#0B3D66">🗺</button>'
           + '</div>'
-          + '<input data-rip-cap="' + esc(p.id) + '" value="' + esc(cap) + '" placeholder="Add description…" '
-          + 'style="width:100%;box-sizing:border-box;border:0;border-top:1px solid #eef1f4;font:500 13px system-ui;color:#33414f;padding:6px 7px">'
+          + '<textarea data-rip-cap="' + esc(p.id) + '" placeholder="Add description…" rows="2" '
+          + 'style="width:100%;box-sizing:border-box;border:0;border-top:1px solid #eef1f4;font:500 13px/1.35 system-ui;color:#33414f;padding:6px 7px;resize:none;overflow:hidden;display:block;min-height:32px">'
+          + esc(cap) + '</textarea>'
           + '</div>';
       });
       html += '</div></div>';
@@ -908,6 +909,17 @@
     _hvEl.style.top = y + 'px';
   }
   function photoHoverHide() { _hvTok++; if (_hvEl) _hvEl.style.display = 'none'; }
+  // Only the central portion of a thumbnail arms the hover preview, so the outer
+  // frame stays free for moving between photos and scrolling. _HV_HOT = central
+  // fraction (0.5 → the middle 50% in both axes; 0.25–0.75 of width and height).
+  var _HV_HOT = 0.5;
+  function _hvInHot(el, e) {
+    var r = el.getBoundingClientRect();
+    if (!r.width || !r.height) return false;
+    var mx = (e.clientX - r.left) / r.width, my = (e.clientY - r.top) / r.height;
+    var lo = (1 - _HV_HOT) / 2, hi = 1 - lo;
+    return mx >= lo && mx <= hi && my >= lo && my <= hi;
+  }
 
   function _flashBtn(btn, txt) { if (!btn) return; const o = btn.textContent; btn.textContent = txt; setTimeout(() => { btn.textContent = o; }, 1100); }
   // Export watermark is automatic (applied on save/copy/print); the global
@@ -1381,9 +1393,15 @@
     const photoGet = (id) => { const api = window._RW && window._RW.geophotos; return api && api.get && api.get(id); };
     host.querySelectorAll('[data-rip-go]').forEach((el) => {
       el.onclick = () => openLightbox(el.getAttribute('data-rip-go'));
-      // Hover → floating magnified preview of the whole photo.
-      el.onmouseenter = (e) => photoHoverShow(el, e);
-      el.onmousemove = (e) => photoHoverMove(e);
+      // Hover → floating magnified preview, but only over the central 50% of the
+      // thumbnail so the outer frame stays free for navigation/scrolling.
+      el.onmouseenter = (e) => { if (_hvInHot(el, e)) photoHoverShow(el, e); };
+      el.onmousemove = (e) => {
+        if (_hvInHot(el, e)) {
+          if (!_hvEl || _hvEl.style.display === 'none') photoHoverShow(el, e);
+          else photoHoverMove(e);
+        } else photoHoverHide();
+      };
       el.onmouseleave = () => photoHoverHide();
     });
     // Per-card quick actions: copy to clipboard, save/download, fly to on map.
@@ -1410,9 +1428,13 @@
       if (hc) { const api = window._RW.geophotos; const n = api.list().filter((x) => (x.rip_route || (x.rip_lot ? 'lot:' + x.rip_lot : '__un__')) === key && x.hearted).length; hc.textContent = '♥ ' + n; }
       if (window.RW2PhotoReport && document.getElementById('pr-overlay') && document.getElementById('pr-overlay').classList.contains('on')) { try { window.RW2PhotoReport.open(); } catch (_) {} }
     });
-    // Photos tab — caption edit (saves on change, no re-render).
+    // Photos tab — caption edit (saves on change, no re-render). Textarea so the
+    // full caption wraps and shows; auto-grow to fit content.
+    const grow = (el) => { el.style.height = 'auto'; el.style.height = (el.scrollHeight + 2) + 'px'; };
     host.querySelectorAll('[data-rip-cap]').forEach((inp) => {
+      grow(inp);
       inp.onclick = (e) => e.stopPropagation();
+      inp.oninput = () => grow(inp);
       inp.onchange = () => { const p = photoGet(inp.getAttribute('data-rip-cap')); if (p) { p.description = inp.value; if (window._RW.geophotos.save) window._RW.geophotos.save(p); } };
     });
     // If we arrived from an Assets 📷 jump, scroll that route's section in.
