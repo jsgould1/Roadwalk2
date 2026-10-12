@@ -200,15 +200,15 @@
     var rows = parseCsv(text);
     if (!rows.length) { status('CSV is empty.'); return; }
     var head = rows[0].map(function (h) { return String(h || '').trim().toLowerCase(); });
-    var iId = head.indexOf('photo_id'), iName = head.indexOf('filename'), iSet = head.indexOf('set'), iDesc = head.indexOf('description');
+    var iId = head.indexOf('photo_id'), iName = head.indexOf('filename'), iSet = head.indexOf('set'), iRoute = head.indexOf('route'), iDesc = head.indexOf('description');
     if (iDesc < 0) { status('CSV needs a "description" column.'); return; }
     var g = geo(); if (!g) { status('Field photos module not available.'); return; }
     var all = g.list(), byId = {}; all.forEach(function (p) { byId[p.id] = p; });
-    var updated = 0, unmatched = 0, saves = [];
+    var autoSaves = [], autoApplied = 0, conflicts = [], unmatched = 0, unchanged = 0;
     for (var r = 1; r < rows.length; r++) {
       var row = rows[r]; if (!row || !row.length) continue;
       var desc = ((iDesc < row.length ? row[iDesc] : '') || '').trim();
-      if (!desc) continue;                       // only apply non-empty descriptions
+      if (!desc) continue;                       // blank cell = leave existing alone
       var p = null;
       if (iId >= 0 && row[iId]) p = byId[row[iId].trim()];
       if (!p && iName >= 0 && row[iName]) {       // fallback: filename (+ set)
@@ -217,13 +217,89 @@
           || all.filter(function (x) { return x._name === fn; })[0];
       }
       if (!p) { unmatched++; continue; }
-      if (p.description !== desc) { p.description = desc; saves.push(p); }
-      updated++;
+      var old = (p.description || '').trim();
+      if (old === desc) { unchanged++; continue; }
+      if (!old) { p.description = desc; autoSaves.push(p); autoApplied++; }   // blank -> fill, no prompt
+      else { conflicts.push({ id: p.id, name: p._name || '', route: (iRoute >= 0 && row[iRoute]) ? row[iRoute] : (p.rip_route || p.rip_lot || ''), old: old, neu: desc }); }
     }
-    Promise.all(saves.map(function (p) { try { return geo().save(p); } catch (e) { return null; } })).then(function () {
-      renderBuilder();
-      status('Applied descriptions to ' + updated + ' photo(s)' + (unmatched ? ' · ' + unmatched + ' unmatched' : '') + '.');
+    Promise.all(autoSaves.map(function (p) { try { return geo().save(p); } catch (e) { return null; } })).then(function () {
+      if (conflicts.length) {
+        openCsvReview(conflicts, { autoApplied: autoApplied, unmatched: unmatched, unchanged: unchanged });
+      } else {
+        renderBuilder();
+        status('Applied ' + autoApplied + ' description(s)' + (unchanged ? ' · ' + unchanged + ' unchanged' : '') + (unmatched ? ' · ' + unmatched + ' unmatched' : '') + '.');
+      }
     });
+  }
+
+  // Review panel: only for CONFLICTS (photo already has a different description).
+  // Each row shows Current vs New with an approve checkbox; blanks were filled
+  // automatically and are reported in the footer.
+  function openCsvReview(conflicts, info) {
+    var ov = $('pr-csvreview');
+    if (!ov) {
+      ov = document.createElement('div'); ov.id = 'pr-csvreview';
+      ov.innerHTML =
+        '<div class="pr-cr-card">' +
+          '<div class="pr-cr-head"><span class="pr-cr-t">Review description changes</span>' +
+            '<span class="pr-cr-sub" id="pr-cr-sub"></span><span class="sp"></span>' +
+            '<label class="pr-cr-alllbl"><input type="checkbox" id="pr-cr-all" checked> approve all</label></div>' +
+          '<div class="pr-cr-body" id="pr-cr-body"></div>' +
+          '<div class="pr-cr-ftr"><span id="pr-cr-status"></span><span class="sp"></span>' +
+            '<button class="pr-btn go" id="pr-cr-apply">Apply approved</button>' +
+            '<button class="pr-btn" id="pr-cr-cancel">Cancel</button></div>' +
+        '</div>';
+      document.body.appendChild(ov);
+      ov.addEventListener('click', function (e) { if (e.target === ov) ov.classList.remove('on'); });
+    }
+    var body = $('pr-cr-body');
+    body.innerHTML = conflicts.map(function (c, i) {
+      return '<div class="pr-cr-row" data-id="' + esc(c.id) + '">' +
+        '<input type="checkbox" class="pr-cr-ck" checked>' +
+        '<div class="pr-cr-thumb" data-img="' + esc(c.id) + '"></div>' +
+        '<div class="pr-cr-txt">' +
+          '<div class="pr-cr-meta">' + esc(c.name || c.id) + (c.route ? ' · ' + esc(c.route) : '') + '</div>' +
+          '<div class="pr-cr-old"><span class="lbl">Current</span>' + esc(c.old) + '</div>' +
+          '<div class="pr-cr-new"><span class="lbl">New</span>' + esc(c.neu) + '</div>' +
+        '</div></div>';
+    }).join('');
+    // lazy thumbnails
+    Array.prototype.forEach.call(body.querySelectorAll('.pr-cr-thumb'), function (t) {
+      imageFor(t.getAttribute('data-img')).then(function (d) { if (d) t.style.backgroundImage = 'url(' + d + ')'; });
+    });
+    var sub = $('pr-cr-sub');
+    sub.textContent = conflicts.length + ' conflict' + (conflicts.length === 1 ? '' : 's') +
+      (info.autoApplied ? ' · ' + info.autoApplied + ' blank filled' : '') +
+      (info.unchanged ? ' · ' + info.unchanged + ' unchanged' : '') +
+      (info.unmatched ? ' · ' + info.unmatched + ' unmatched' : '');
+    $('pr-cr-all').checked = true;
+    $('pr-cr-all').onchange = function () {
+      var on = $('pr-cr-all').checked;
+      Array.prototype.forEach.call(body.querySelectorAll('.pr-cr-ck'), function (ck) { ck.checked = on; });
+    };
+    $('pr-cr-cancel').onclick = function () {
+      ov.classList.remove('on');
+      renderBuilder();
+      status('Filled ' + info.autoApplied + ' blank(s); ' + conflicts.length + ' conflict(s) left unchanged.');
+    };
+    $('pr-cr-apply').onclick = function () {
+      var byId = {}; (geo() ? geo().list() : []).forEach(function (p) { byId[p.id] = p; });
+      var saves = [], applied = 0;
+      Array.prototype.forEach.call(body.querySelectorAll('.pr-cr-row'), function (rowEl) {
+        var ck = rowEl.querySelector('.pr-cr-ck'); if (!ck.checked) return;
+        var c = conflicts.filter(function (x) { return x.id === rowEl.getAttribute('data-id'); })[0];
+        var p = c && byId[c.id]; if (!p) return;
+        p.description = c.neu; saves.push(p); applied++;
+      });
+      Promise.all(saves.map(function (p) { try { return geo().save(p); } catch (e) { return null; } })).then(function () {
+        ov.classList.remove('on');
+        renderBuilder();
+        status('Applied ' + (info.autoApplied + applied) + ' description(s) (' + applied + ' overwritten' +
+          (info.autoApplied ? ', ' + info.autoApplied + ' blank filled' : '') + ')' +
+          (info.unmatched ? ' · ' + info.unmatched + ' unmatched' : '') + '.');
+      });
+    };
+    ov.classList.add('on');
   }
 
   function imageFor(id) {
@@ -711,7 +787,29 @@
       '.pr-span.full{background:#16315E;color:#fff;border-color:#16315E}' +
       '.pr-cap{font:500 11.5px system-ui;border:1px solid var(--rule,#DDD7C8);border-radius:5px;padding:4px 6px;resize:vertical;width:100%}' +
       '.pr-btn{font:600 12.5px system-ui;padding:6px 12px;border-radius:7px;border:1px solid var(--rule,#DDD7C8);background:#fff;cursor:pointer}' +
-      '.pr-btn.go{background:var(--orange,#C85A2B);color:#fff;border-color:var(--orange,#C85A2B)}';
+      '.pr-btn.go{background:var(--orange,#C85A2B);color:#fff;border-color:var(--orange,#C85A2B)}' +
+      // CSV import review (conflicts only)
+      '#pr-csvreview{position:fixed;inset:0;z-index:4200;background:rgba(20,22,28,.55);display:none}' +
+      '#pr-csvreview.on{display:flex}' +
+      '.pr-cr-card{margin:auto;width:min(760px,94vw);max-height:88vh;background:var(--paper,#FBFAF6);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.45)}' +
+      '.pr-cr-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--rule,#DDD7C8);background:#fff}' +
+      '.pr-cr-head .pr-cr-t{font-weight:800;color:#16315E;font-size:15px}' +
+      '.pr-cr-sub{font:600 11.5px "IBM Plex Mono",monospace;color:#8a949f}' +
+      '.pr-cr-head .sp{flex:1 1 auto}' +
+      '.pr-cr-alllbl{font:600 12px system-ui;color:#555;display:flex;align-items:center;gap:5px;cursor:pointer}' +
+      '.pr-cr-body{flex:1 1 auto;overflow:auto;padding:10px 14px}' +
+      '.pr-cr-row{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid #eef1f4}' +
+      '.pr-cr-row>.pr-cr-ck{margin-top:3px;flex:0 0 auto;width:16px;height:16px;cursor:pointer}' +
+      '.pr-cr-thumb{flex:0 0 auto;width:90px;height:68px;border-radius:6px;background:#ECE8DC center/cover no-repeat;border:1px solid #e3e8ee}' +
+      '.pr-cr-txt{flex:1 1 auto;min-width:0}' +
+      '.pr-cr-meta{font:700 11px "IBM Plex Mono",monospace;color:#12233b;margin-bottom:3px}' +
+      '.pr-cr-old,.pr-cr-new{font:500 12px system-ui;line-height:1.3;padding:3px 7px;border-radius:5px;margin-top:3px;white-space:pre-wrap;overflow-wrap:anywhere}' +
+      '.pr-cr-old{background:#f3ecea;color:#9a5b4a;text-decoration:line-through}' +
+      '.pr-cr-new{background:#e7f1ea;color:#1b6b4a}' +
+      '.pr-cr-old .lbl,.pr-cr-new .lbl{display:inline-block;font:800 9px system-ui;letter-spacing:.06em;text-transform:uppercase;margin-right:6px;opacity:.75;text-decoration:none}' +
+      '.pr-cr-ftr{display:flex;align-items:center;gap:10px;padding:11px 16px;border-top:1px solid var(--rule,#DDD7C8);background:#fff}' +
+      '.pr-cr-ftr .sp{flex:1 1 auto}' +
+      '.pr-cr-ftr #pr-cr-status{font:500 11.5px system-ui;color:#8a949f}';
     document.head.appendChild(st);
   }
 
