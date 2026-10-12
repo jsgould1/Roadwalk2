@@ -176,6 +176,21 @@
   }
   function chunk6(arr) { var out = []; for (var i = 0; i < arr.length; i += 6) out.push(arr.slice(i, i + 6)); return out; }
 
+  // Group a page's 1..6 photos into visual rows (each row = 1 full-width photo
+  // or 2 side-by-side). Mirrors layoutFor, but as explicit rows so each row can
+  // own an image band (equal heights) + a caption band below it.
+  function rowsFor(ph) {
+    var n = ph.length;
+    switch (n) {
+      case 1: return [{ photos: [ph[0]], full: true }];
+      case 2: return [{ photos: [ph[0]], full: true }, { photos: [ph[1]], full: true }];
+      case 3: return [{ photos: [ph[0], ph[1]] }, { photos: [ph[2]], full: true }];
+      case 4: return [{ photos: [ph[0], ph[1]] }, { photos: [ph[2], ph[3]] }];
+      case 5: return [{ photos: [ph[0], ph[1]] }, { photos: [ph[2], ph[3]] }, { photos: [ph[4]], full: true }];
+      default: return [{ photos: [ph[0], ph[1]] }, { photos: [ph[2], ph[3]] }, { photos: [ph[4], ph[5]] }];
+    }
+  }
+
   // ---- PDF (print window) ----------------------------------------------------
   function generate() {
     var secs = selectedSections(grouped(true));
@@ -208,6 +223,7 @@
         var img = {}; var missing = 0;
         res.forEach(function (r) { if (r.d) img[r.id] = r.d; else missing++; });
         var wmOn = !$('pr-wm') || $('pr-wm').checked;
+        var pageNums = !$('pr-pagenums') || $('pr-pagenums').checked;
         // Each page's header park is derived from that section's own route/lot
         // prefix, so a multi-park print labels every page correctly. The manual
         // Park field only overrides when a single park is being printed.
@@ -226,7 +242,7 @@
           var park = (singlePark && fieldVal) ? fieldVal : (parkFullName(code2) || fieldVal || _parkName || code2 || 'Field Photos');
           pages.forEach(function (pagePhotos, pi) {
             pagesHtml += pageHtml({ park: park, aecomLogo: aecomLogo, aecomBlack: aecomBlack, npsLogo: npsLogo,
-              secTitle: s.title, routeId: routeId, pageIdx: pi + 1, pageCount: pages.length, photos: pagePhotos, img: img, wmOn: wmOn });
+              secTitle: s.title, routeId: routeId, pageIdx: pi + 1, pageCount: pages.length, photos: pagePhotos, img: img, wmOn: wmOn, pageNums: pageNums });
           });
         });
         if (!pagesHtml) { status('No printable images (all offloaded with no stored copy?).'); return; }
@@ -306,21 +322,27 @@
   }
 
   function pageHtml(o) {
-    var lay = layoutFor(o.photos.length);
-    var cells = o.photos.map(function (p, i) {
-      var full = lay.fulls[i] ? ' full' : '';
-      var cap = (p.description || '').trim();
+    function imgboxHtml(p) {
       var wmLines = o.wmOn ? watermarkLines(p) : [];
       var metaHtml = wmLines.map(function (l, li) {
         return '<div' + (li === 0 ? ' class="wm0"' : '') + '>' + esc(l) + '</div>';
       }).join('');
       // info bar carries ONLY the metadata; the typed description sits centered
-      // directly below the image so it never overlaps the route/STA/GPS lines.
+      // below the image so it never overlaps the route/STA/GPS lines.
       var wmHtml = metaHtml ? '<div class="wm">' + metaHtml + '</div>' : '';
-      return '<div class="cell' + full + '">' +
-        '<div class="imgbox"><img src="' + o.img[p.id] + '">' + wmHtml + '</div>' +
-        (cap ? '<div class="cap">' + esc(cap) + '</div>' : '') +
-        '</div>';
+      return '<div class="imgbox"><img src="' + o.img[p.id] + '">' + wmHtml + '</div>';
+    }
+    // Each row owns an image band (both photos share one height, so a caption on
+    // one photo shrinks BOTH equally) and, only when any photo in the row has a
+    // description, a caption band below with one centered cell per photo.
+    var cells = rowsFor(o.photos).map(function (row) {
+      var imgs = row.photos.map(imgboxHtml).join('');
+      var anyCap = row.photos.some(function (p) { return (p.description || '').trim(); });
+      var caps = anyCap ? '<div class="prow-caps">' + row.photos.map(function (p) {
+        var cap = (p.description || '').trim();
+        return '<div class="cap">' + (cap ? esc(cap) : '') + '</div>';
+      }).join('') + '</div>' : '';
+      return '<div class="prow' + (row.full ? ' full' : '') + '"><div class="prow-imgs">' + imgs + '</div>' + caps + '</div>';
     }).join('');
     var npsHtml = o.npsLogo ? '<img class="nps-logo" src="' + o.npsLogo + '" alt="NPS">' : '';
     var aecomHtml = o.aecomLogo ? '<img class="ftr-logo' + (o.aecomBlack ? ' blk' : '') + '" src="' + o.aecomLogo + '" alt="AECOM">' : '<span class="ftr-aecom">AECOM</span>';
@@ -330,13 +352,14 @@
     var scHtml = (sci >= 0)
       ? '<span class="sc-id">' + esc(o.secTitle.slice(0, sci)) + '</span><span class="sc-nm">' + esc(o.secTitle.slice(sci + 3)) + '</span>'
       : '<span class="sc-nm">' + esc(o.secTitle) + '</span>';
-    return '<section class="page" style="--rows:' + lay.rows + '">' +
+    var pgHtml = (o.pageNums === false) ? '' : '<span class="pg">Page ' + o.pageIdx + ' of ' + o.pageCount + '</span>';
+    return '<section class="page">' +
       '<div class="phdr">' + npsHtml +
       '<span class="pk">' + parkHtml + '</span>' +
       '<span class="sc">' + scHtml + '</span></div>' +
       '<div class="grid">' + cells + '</div>' +
       '<div class="pftr">' + aecomHtml +
-      '<div class="pftr-r"><span class="rid">' + esc(o.routeId) + '</span><span class="pg">Page ' + o.pageIdx + ' of ' + o.pageCount + '</span></div>' +
+      '<div class="pftr-r"><span class="rid">' + esc(o.routeId) + '</span>' + pgHtml + '</div>' +
       '</div></section>';
   }
 
@@ -349,7 +372,7 @@
       'html,body{margin:0;padding:0;font-family:"IBM Plex Sans",system-ui,sans-serif;color:#1A1D22}' +
       // Fixed page box, clipped so nothing can spill onto (and overlap) the next
       // printed page; small height buffer keeps a section to exactly one sheet.
-      '.page{height:9.9in;display:flex;flex-direction:column;overflow:hidden;page-break-after:always;break-after:page;break-inside:avoid;page-break-inside:avoid}' +
+      '.page{height:9.9in;padding-bottom:0.16in;display:flex;flex-direction:column;overflow:hidden;page-break-after:always;break-after:page;break-inside:avoid;page-break-inside:avoid}' +
       '.page:last-child{page-break-after:auto;break-after:auto}' +
       // header: NPS logo + full park name (navy) at top-left, section at right
       '.phdr{display:flex;align-items:center;gap:10px;border-bottom:2px solid #16315E;padding-bottom:6px;margin-bottom:9px;flex:0 0 auto}' +
@@ -358,21 +381,25 @@
       '.phdr .sc{flex:1 1 auto;text-align:right;align-self:flex-end;display:flex;flex-direction:column;align-items:flex-end;line-height:1.15}' +
       '.phdr .sc .sc-id{font-weight:700;font-size:14px;color:#5b6673;letter-spacing:.4px}' +
       '.phdr .sc .sc-nm{font-weight:700;font-size:14px;color:#5b6673;white-space:normal}' +
-      '.grid{flex:1 1 auto;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(var(--rows),1fr);gap:0.16in;min-height:0}' +
-      '.cell{display:flex;flex-direction:column;min-height:0;min-width:0}' +
-      '.cell.full{grid-column:1 / -1}' +
+      // stack of equal-height rows; each row = an image band + optional caption band
+      '.grid{flex:1 1 auto;display:flex;flex-direction:column;gap:0.16in;min-height:0}' +
+      '.prow{flex:1 1 0;display:flex;flex-direction:column;min-height:0}' +
+      '.prow-imgs{flex:1 1 auto;display:flex;gap:0.16in;min-height:0}' +
+      '.prow-imgs .imgbox{flex:1 1 0}' +
+      '.prow-caps{flex:0 0 auto;display:flex;gap:0.16in;padding-top:3px}' +
+      '.prow-caps .cap{flex:1 1 0;min-width:0}' +
       // engineering look: white, thin border, photo fills the frame so the
       // watermark sits across the bottom of the actual image
-      '.imgbox{position:relative;flex:1 1 auto;min-height:0;overflow:hidden;border:0.75pt solid #9aa3ad;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
+      '.imgbox{position:relative;min-height:0;min-width:0;overflow:hidden;border:0.75pt solid #9aa3ad;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
       '.imgbox img{width:100%;height:100%;object-fit:cover;display:block}' +
       // solid info bar across the bottom of the image
       '.wm{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,0.68);color:#fff;font:600 8px "IBM Plex Mono",monospace;letter-spacing:.2px;padding:4px 8px 5px;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
       '.wm div{line-height:1.45;white-space:pre}' +
       '.wm .wm0{font-weight:800;font-size:9.5px;letter-spacing:.4px}' +
-      // typed description — centered directly below the image (never over the data)
-      '.cap{flex:0 0 auto;text-align:center;font:600 9px "IBM Plex Sans",system-ui;color:#1A1D22;line-height:1.3;padding:4px 6px 0;white-space:normal;overflow-wrap:anywhere}' +
+      // typed description — centered under its image (never over the data)
+      '.cap{text-align:center;font:600 9px "IBM Plex Sans",system-ui;color:#1A1D22;line-height:1.3;padding:0 6px;white-space:normal;overflow-wrap:anywhere}' +
       // footer: AECOM logo (bottom-left) + Route ID over Page N of X (bottom-right)
-      '.pftr{flex:0 0 auto;display:flex;justify-content:space-between;align-items:flex-end;border-top:1pt solid #c7ccd2;margin-top:8px;padding-top:6px}' +
+      '.pftr{flex:0 0 auto;display:flex;justify-content:space-between;align-items:flex-end;border-top:1pt solid #c7ccd2;margin-top:0.14in;padding-top:6px}' +
       '.pftr .ftr-logo{height:16px;width:auto;object-fit:contain}' +
       '.pftr .ftr-logo:not(.blk){filter:brightness(0)}' +
       '.pftr .ftr-aecom{font:800 12px "IBM Plex Sans",system-ui;color:#16315E;letter-spacing:1px}' +
@@ -491,6 +518,7 @@
             '<label style="font:600 12px system-ui;color:#555">Park&nbsp;<input id="pr-park" placeholder="Park name"></label>' +
             '<label style="font:600 12px system-ui;color:#555;display:flex;align-items:center;gap:4px"><input type="checkbox" id="pr-hearted" checked> hearted only</label>' +
             '<label style="font:600 12px system-ui;color:#555;display:flex;align-items:center;gap:4px" title="Overlay GPS + date/time on each photo in the PDF"><input type="checkbox" id="pr-wm" checked> watermark</label>' +
+            '<label style="font:600 12px system-ui;color:#555;display:flex;align-items:center;gap:4px" title="Show \'Page N of X\' in the footer (AECOM logo + Route ID always print)"><input type="checkbox" id="pr-pagenums" checked> page numbers</label>' +
             '<span id="pr-count" style="font:600 12px \'IBM Plex Mono\',monospace;color:var(--mute,#9BA0A8)">0 hearted</span>' +
             '<span class="sp"></span>' +
             '<span id="pr-status" style="font:500 11.5px system-ui;color:var(--mute,#9BA0A8)"></span>' +
@@ -505,10 +533,12 @@
       $('pr-go').addEventListener('click', generate);
       $('pr-hearted').addEventListener('change', renderBuilder);
       $('pr-wm').addEventListener('change', function () { try { localStorage.setItem('rw_export_watermark', $('pr-wm').checked ? '1' : '0'); } catch (e) {} });
+      $('pr-pagenums').addEventListener('change', function () { try { localStorage.setItem('rw_report_pagenums', $('pr-pagenums').checked ? '1' : '0'); } catch (e) {} });
     }
     ov.classList.add('on');
     // Reflect the global export-watermark setting (save/copy/print share it).
     var pw = $('pr-wm'); if (pw) { try { pw.checked = localStorage.getItem('rw_export_watermark') !== '0'; } catch (e) {} }
+    var pn = $('pr-pagenums'); if (pn) { try { pn.checked = localStorage.getItem('rw_report_pagenums') !== '0'; } catch (e) {} }
     // Warm the route geometry so STA/MP are ready when Generate is clicked.
     if (window.RW2PhotoTag && window.RW2PhotoTag.ensureGeo) { try { window.RW2PhotoTag.ensureGeo(); } catch (e) {} }
     // Auto-fill the Park field with the full park name for the loaded park.
