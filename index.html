@@ -120,7 +120,7 @@
 <script src="modules/photo-sets.js?v=5" defer></script>
 <script src="modules/photo-autotag.js?v=5" defer></script>
 <script src="modules/photo-route-view.js?v=4" defer></script>
-<script src="modules/photo-report.js?v=25" defer></script>
+<script src="modules/photo-report.js?v=26" defer></script>
 <script src="modules/photo-dashboard.js?v=4" defer></script>
 
 <style>
@@ -37640,10 +37640,11 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     if (_hgEl) return _hgEl;
     var st = document.createElement('style');
     st.textContent =
-      '.gp-hovergrid{position:fixed;z-index:100001;display:none;background:#fff;border:1px solid #c7ccd2;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.33);padding:8px}' +
-      '.gp-hg-head{font:600 11px system-ui;color:#0B3D66;margin-bottom:6px}' +
-      '.gp-hg-grid{display:grid;grid-template-columns:repeat(auto-fill,64px);gap:6px;max-height:258px;overflow:auto}' +
-      '.gp-hg-tile{width:64px;height:64px;border-radius:7px;border:1px solid #e3e8ee;background:#f4f1e8 center/cover no-repeat;cursor:pointer;padding:0;position:relative;font-size:20px;color:#9BA0A8;display:flex;align-items:center;justify-content:center}' +
+      '.gp-hovergrid{position:fixed;z-index:100001;display:none;background:#fff;border:1px solid #c7ccd2;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.33);padding:9px;max-width:95vw}' +
+      '.gp-hg-head{font:600 11.5px system-ui;color:#0B3D66;margin-bottom:7px}' +
+      // larger LANDSCAPE tiles in a 2-row grid (columns set inline per count)
+      '.gp-hg-grid{display:grid;gap:7px;max-height:62vh;overflow:auto}' +
+      '.gp-hg-tile{width:150px;height:112px;border-radius:7px;border:1px solid #e3e8ee;background:#f4f1e8 center/cover no-repeat;cursor:pointer;padding:0;position:relative;font-size:26px;color:#9BA0A8;display:flex;align-items:center;justify-content:center}' +
       '.gp-hg-tile.hearted{box-shadow:0 0 0 2px #C85A2B;border-color:#C85A2B}' +
       '.gp-hg-tile:hover{outline:2px solid #0B3D66;outline-offset:1px}' +
       '.gp-hg-more{font:500 10.5px system-ui;color:#8a949f;margin-top:5px;text-align:center}';
@@ -37692,8 +37693,12 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         (src ? ' style="background-image:url(' + src + ')"' : ' data-off="1"') +
         ' title="' + escapeHtml(p._name || '') + '">' + (src ? '' : '☁') + '</button>';
     }).join('');
+    // Aim for a wide, ~2-row landscape grid: columns = ceil(n/2), capped at 4
+    // (so 4→2x2, 6→2x3, 8→2x4; more than 8 keeps 4 cols and scrolls).
+    var cols = Math.min(4, Math.max(2, Math.ceil(shown.length / 2)));
+    if (shown.length === 1) cols = 1;
     _hgEl.innerHTML = '<div class="gp-hg-head">' + markers.length + ' photos here · click to open</div>' +
-      '<div class="gp-hg-grid">' + tiles + '</div>' +
+      '<div class="gp-hg-grid" style="grid-template-columns:repeat(' + cols + ',150px)">' + tiles + '</div>' +
       (markers.length > HG_MAX_TILES ? '<div class="gp-hg-more">+' + (markers.length - HG_MAX_TILES) + ' more</div>' : '');
     _hgEl.style.display = 'block';
     Array.prototype.forEach.call(_hgEl.querySelectorAll('.gp-hg-tile'), function (b) {

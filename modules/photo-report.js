@@ -446,7 +446,42 @@
     try { geo().save(p); } catch (e) {}
   }
 
+  // ---- builder hover-to-upsize preview --------------------------------------
+  // Hovering a card thumbnail pops up a large floating preview so the image and
+  // its place in the order are easy to read while arranging. Shows above the
+  // overlay; a token guards async (offloaded) image loads.
+  var _prHvEl = null, _prHvImg = null, _prHvTok = 0, _prHvMouse = { x: 0, y: 0 };
+  function _prHvEnsure() {
+    if (_prHvEl) return _prHvEl;
+    _prHvEl = document.createElement('div'); _prHvEl.id = 'pr-hover';
+    _prHvEl.style.cssText = 'position:fixed;z-index:4100;pointer-events:none;display:none;background:#fff;border:1px solid #c7ccd2;border-radius:10px;box-shadow:0 12px 34px rgba(0,0,0,.42);padding:4px';
+    _prHvImg = document.createElement('img');
+    _prHvImg.style.cssText = 'display:block;max-width:46vw;max-height:70vh;object-fit:contain;border-radius:6px';
+    _prHvImg.onload = function () { _prHvMove(_prHvMouse); };
+    _prHvEl.appendChild(_prHvImg); document.body.appendChild(_prHvEl);
+    return _prHvEl;
+  }
+  function _prHvShow(id, e) {
+    if (e) { _prHvMouse = { x: e.clientX, y: e.clientY }; }
+    _prHvEnsure();
+    var tok = ++_prHvTok;
+    imageFor(id).then(function (url) {
+      if (url && tok === _prHvTok) { _prHvImg.src = url; _prHvEl.style.display = 'block'; _prHvMove(_prHvMouse); }
+    }).catch(function () {});
+  }
+  function _prHvMove(e) {
+    if (e) { _prHvMouse = { x: (e.clientX != null ? e.clientX : e.x), y: (e.clientY != null ? e.clientY : e.y) }; }
+    if (!_prHvEl || _prHvEl.style.display === 'none') return;
+    var pad = 18, vw = window.innerWidth, vh = window.innerHeight, w = _prHvEl.offsetWidth || 360, h = _prHvEl.offsetHeight || 270;
+    var x = _prHvMouse.x + pad, y = _prHvMouse.y + pad;
+    if (x + w > vw - 8) x = _prHvMouse.x - pad - w; if (x < 8) x = 8;
+    if (y + h > vh - 8) y = vh - 8 - h; if (y < 8) y = 8;
+    _prHvEl.style.left = x + 'px'; _prHvEl.style.top = y + 'px';
+  }
+  function _prHvHide() { _prHvTok++; if (_prHvEl) _prHvEl.style.display = 'none'; }
+
   function renderBuilder() {
+    _prHvHide();
     var host = $('pr-body'); if (!host) return;
     var heartedOnly = $('pr-hearted') && $('pr-hearted').checked;
     var secs = grouped(heartedOnly);
@@ -496,9 +531,14 @@
       cap.addEventListener('input', function () { saveCaption(p, cap.value); });
       var thumb = card.querySelector('.pr-thumb');
       imageFor(id).then(function (d) { if (d) thumb.style.backgroundImage = 'url(' + d + ')'; else thumb.classList.add('pr-off'); });
+      // hover the thumbnail → large floating preview (easier to read while ordering)
+      thumb.addEventListener('mouseenter', function (e) { _prHvShow(id, e); });
+      thumb.addEventListener('mousemove', function (e) { _prHvMove(e); });
+      thumb.addEventListener('mouseleave', function () { _prHvHide(); });
       // drag-to-reorder (handle = the number badge; reorder stays within section)
       var handle = card.querySelector('.pr-num');
       handle.addEventListener('dragstart', function (e) {
+        _prHvHide();
         _dragGrid = card.parentNode; card.classList.add('pr-dragging');
         if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', id); } catch (_) {} try { e.dataTransfer.setDragImage(card, 20, 20); } catch (_) {} }
       });
@@ -621,7 +661,7 @@
     renderTree();
     renderBuilder();
   }
-  function closeOverlay() { var ov = $('pr-overlay'); if (ov) ov.classList.remove('on'); }
+  function closeOverlay() { _prHvHide(); var ov = $('pr-overlay'); if (ov) ov.classList.remove('on'); }
 
   function tryParkName(code) {
     return fetch('data/rip/parks_index.json', { cache: 'force-cache' })
