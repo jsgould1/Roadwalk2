@@ -768,20 +768,28 @@
     return '<span style="font-size:12px;color:#8a949f">Park</span><select id="rip-photo-park" title="Scope photos to a park" style="border:1px solid #d3dae1;border-radius:8px;padding:4px 7px;font:12.5px system-ui;background:#fff">' + opts + '</select>';
   }
 
-  function photosTable() {
+  // The photos currently in scope on the Photos tab (hearted + park filters).
+  // Shared by the grid and the CSV export so both match exactly.
+  function ripFilteredPhotos() {
     const api = window._RW && window._RW.geophotos;
-    if (!api || !api.list) return { html: '<div style="padding:40px;text-align:center;color:#8a949f">Field photos module not loaded.</div>' };
-    const all = api.list();
-    if (!all.length) return { html: '<div style="padding:40px;text-align:center;color:#8a949f">No field photos yet. Import photos, then use <b>Tag photos to routes</b> in the Photo Triage module.</div>' };
-    let photos = state.photoHeartedOnly ? all.filter((p) => p.hearted) : all;
-    // Park scope: default to the loaded park so photos from other parks (incl.
-    // offloaded/untagged ones) don't bleed in. '__all__' shows everything,
-    // '__none__' shows photos not attributable to any park, else an exact code.
+    if (!api || !api.list) return [];
+    let photos = state.photoHeartedOnly ? api.list().filter((p) => p.hearted) : api.list().slice();
     const curPark = (state.park || '').toUpperCase();
     const pf = state.photoPark || '__cur__';
     if (pf === '__cur__') { if (curPark) photos = photos.filter((p) => photoParkOf(p) === curPark); }
     else if (pf === '__none__') photos = photos.filter((p) => !photoParkOf(p));
     else if (pf !== '__all__') photos = photos.filter((p) => photoParkOf(p) === pf);
+    return photos;
+  }
+
+  function photosTable() {
+    const api = window._RW && window._RW.geophotos;
+    if (!api || !api.list) return { html: '<div style="padding:40px;text-align:center;color:#8a949f">Field photos module not loaded.</div>' };
+    const all = api.list();
+    if (!all.length) return { html: '<div style="padding:40px;text-align:center;color:#8a949f">No field photos yet. Import photos, then use <b>Tag photos to routes</b> in the Photo Triage module.</div>' };
+    const pf = state.photoPark || '__cur__';
+    const curPark = (state.park || '').toUpperCase();
+    let photos = ripFilteredPhotos();
     if (!photos.length) {
       const why = state.photoHeartedOnly ? 'No hearted photos' : 'No photos';
       const scope = (pf === '__cur__' && curPark) ? ' for ' + curPark : (pf === '__none__' ? ' without a park' : (pf !== '__all__' ? ' for ' + pf : ''));
@@ -1305,6 +1313,8 @@
       + ((state.tab === 'assets' || state.tab === 'conditions') ? '<button id="rip-cols-btn" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">Columns ▾</button>' : '')
       + (state.tab !== 'custom' && state.tab !== 'photos' ? '<button id="rip-csv" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 11px;cursor:pointer;font:600 12px system-ui;color:#12233b">⬇ CSV</button>' : '')
       + (state.tab === 'photos' ? '<button id="rip-print-pdf" title="Heart photos, add captions, and print a photo-report PDF" style="border:0;background:#C85A2B;color:#fff;border-radius:8px;padding:6px 12px;cursor:pointer;font:700 12.5px system-ui">🖨 Print Photo PDF</button>'
+          + '<button id="rip-csv-out" title="Export a CSV of the photos shown (with file paths) to author descriptions" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 10px;cursor:pointer;font:600 12px system-ui;color:#12233b">⬇ Descr. CSV</button>'
+          + '<label id="rip-csv-in-lbl" title="Import a CSV to apply descriptions to the matching photos" style="border:1px solid #d3dae1;background:#fff;border-radius:8px;padding:5px 10px;cursor:pointer;font:600 12px system-ui;color:#12233b;display:inline-flex;align-items:center">⬆ Import CSV<input type="file" id="rip-csv-in" accept=".csv,text/csv" style="display:none"></label>'
           + photoParkSelectHtml()
           + '<label title="Show only hearted photos so you can review and trim the selection" style="display:inline-flex;align-items:center;gap:5px;font:600 12px system-ui;color:#12233b;border:1px solid ' + (state.photoHeartedOnly ? '#C85A2B' : '#d3dae1') + ';background:' + (state.photoHeartedOnly ? '#FBEDE6' : '#fff') + ';border-radius:8px;padding:5px 10px;cursor:pointer"><input type="checkbox" id="rip-photo-hearted"' + (state.photoHeartedOnly ? ' checked' : '') + ' style="margin:0;cursor:pointer"><span style="color:#C85A2B">♥</span> Hearted only</label>'
           + '<span style="font-size:12px;color:#8a949f">Size</span><select id="rip-photo-size" style="border:1px solid #d3dae1;border-radius:8px;padding:4px 7px;font:12.5px system-ui;background:#fff">'
@@ -1342,6 +1352,19 @@
     if (phh) phh.onchange = () => { state.photoHeartedOnly = phh.checked; try { localStorage.setItem('rw_rip_photo_hearted', phh.checked ? '1' : '0'); } catch (e) {} render(); };
     const ppk = $('rip-photo-park');
     if (ppk) ppk.onchange = () => { state.photoPark = ppk.value; try { localStorage.setItem('rw_rip_photo_park', ppk.value); } catch (e) {} render(); };
+    const csvOut = $('rip-csv-out');
+    if (csvOut) csvOut.onclick = () => {
+      const ps = ripFilteredPhotos();
+      if (!ps.length) { alert('No photos in scope to export (check the Park / Hearted filters).'); return; }
+      if (window.RW2PhotoReport && window.RW2PhotoReport.exportCsv) window.RW2PhotoReport.exportCsv(ps);
+    };
+    const csvIn = $('rip-csv-in');
+    if (csvIn) csvIn.onchange = function () {
+      const f = this.files && this.files[0]; if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => { if (window.RW2PhotoReport && window.RW2PhotoReport.importCsv) window.RW2PhotoReport.importCsv(String(rd.result || ''), () => render()); };
+      rd.readAsText(f); this.value = '';
+    };
 
     // Assets → Photos: jump to the Photos tab, focused on this route's section.
     host.querySelectorAll('[data-photos]').forEach((b) => b.onclick = (e) => {

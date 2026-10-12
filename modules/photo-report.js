@@ -139,27 +139,33 @@
     if (p._relpath) return p._relpath;
     return (p._set ? p._set + '/' : '') + (p._name || '');
   }
-  function buildDescriptionsCsv() {
-    var base = (($('pr-photobase') && $('pr-photobase').value) || '').trim().replace(/[\\/]+$/, '');
-    var secs = selectedSections(grouped(true));
-    var lines = [['photo_id', 'filename', 'set', 'park', 'route', 'sta', 'mp', 'lat', 'lng', 'file_path', 'description'].map(csvCell).join(',')];
-    secs.forEach(function (s) {
-      var code = parkCodeOf(s.key);
-      s.photos.forEach(function (p) {
-        var rel = photoRelPath(p);
-        var full = base ? (base + '\\' + rel.replace(/\//g, '\\')) : rel;
-        lines.push([
-          p.id, p._name || '', p._set || '', code,
-          p.rip_route || (p.rip_lot ? 'lot:' + p.rip_lot : ''),
-          (p.rip_route_sta != null ? fmtSta(p.rip_route_sta) : ''),
-          (p.rip_route_mp != null ? p.rip_route_mp : ''),
-          (isFinite(Number(p.lat)) ? Number(p.lat).toFixed(6) : ''),
-          (isFinite(Number(p.lng)) ? Number(p.lng).toFixed(6) : ''),
-          full, p.description || ''
-        ].map(csvCell).join(','));
-      });
-    });
+  var CSV_HEADER = ['photo_id', 'filename', 'set', 'park', 'route', 'sta', 'mp', 'lat', 'lng', 'file_path', 'description'];
+  function csvRowFor(p, base) {
+    var route = p.rip_route || (p.rip_lot ? 'lot:' + p.rip_lot : '');
+    var code = (p.rip_park || parkCodeOf(route) || '').toUpperCase();
+    var rel = photoRelPath(p);
+    var full = base ? (base + '\\' + rel.replace(/\//g, '\\')) : rel;
+    return [
+      p.id, p._name || '', p._set || '', code, route,
+      (p.rip_route_sta != null ? fmtSta(p.rip_route_sta) : ''),
+      (p.rip_route_mp != null ? p.rip_route_mp : ''),
+      (isFinite(Number(p.lat)) ? Number(p.lat).toFixed(6) : ''),
+      (isFinite(Number(p.lng)) ? Number(p.lng).toFixed(6) : ''),
+      full, p.description || ''
+    ].map(csvCell).join(',');
+  }
+  // Build the CSV for ANY list of photos (used by the report selection and by
+  // the RIP Photos tab). base = the on-disk folder for the file_path column.
+  function buildCsvForPhotos(photos, base) {
+    base = (base || '').trim().replace(/[\\/]+$/, '');
+    var lines = [CSV_HEADER.map(csvCell).join(',')];
+    (photos || []).forEach(function (p) { lines.push(csvRowFor(p, base)); });
     return lines.join('\r\n');
+  }
+  function reportBaseFolder() {
+    var v = ($('pr-photobase') && $('pr-photobase').value) || '';
+    if (!v) { try { v = localStorage.getItem('rw_report_photo_base') || ''; } catch (e) {} }
+    return v;
   }
   function downloadText(name, text, mime) {
     try {
@@ -170,12 +176,15 @@
       setTimeout(function () { try { document.body.removeChild(a); } catch (e) {} URL.revokeObjectURL(url); }, 0);
     } catch (e) { status('Download failed: ' + e); }
   }
+  function downloadCsvForPhotos(photos, base) {
+    downloadText('photo-descriptions-' + new Date().toISOString().slice(0, 10) + '.csv', buildCsvForPhotos(photos, base));
+  }
   function exportDescriptionsCsv() {
     var secs = selectedSections(grouped(true));
-    var n = 0; secs.forEach(function (s) { n += s.photos.length; });
-    if (!n) { status('Nothing selected — heart photos and pick routes first.'); return; }
-    downloadText('photo-descriptions-' + new Date().toISOString().slice(0, 10) + '.csv', buildDescriptionsCsv());
-    status('Exported ' + n + ' row(s). Fill the "description" column, then Import CSV.');
+    var photos = []; secs.forEach(function (s) { photos = photos.concat(s.photos); });
+    if (!photos.length) { status('Nothing selected — heart photos and pick routes first.'); return; }
+    downloadCsvForPhotos(photos, reportBaseFolder());
+    status('Exported ' + photos.length + ' row(s). Fill the "description" column, then Import CSV.');
   }
   // minimal RFC4180-ish parser → array of row arrays
   function parseCsv(text) {
@@ -196,7 +205,8 @@
     if (cell.length || row.length) { row.push(cell); rows.push(row); }
     return rows;
   }
-  function importDescriptionsCsv(text) {
+  function importDescriptionsCsv(text, onDone) {
+    onDone = onDone || function () {};
     var rows = parseCsv(text);
     if (!rows.length) { status('CSV is empty.'); return; }
     var head = rows[0].map(function (h) { return String(h || '').trim().toLowerCase(); });
@@ -224,10 +234,11 @@
     }
     Promise.all(autoSaves.map(function (p) { try { return geo().save(p); } catch (e) { return null; } })).then(function () {
       if (conflicts.length) {
-        openCsvReview(conflicts, { autoApplied: autoApplied, unmatched: unmatched, unchanged: unchanged });
+        openCsvReview(conflicts, { autoApplied: autoApplied, unmatched: unmatched, unchanged: unchanged }, onDone);
       } else {
         renderBuilder();
         status('Applied ' + autoApplied + ' description(s)' + (unchanged ? ' · ' + unchanged + ' unchanged' : '') + (unmatched ? ' · ' + unmatched + ' unmatched' : '') + '.');
+        onDone();
       }
     });
   }
@@ -235,7 +246,8 @@
   // Review panel: only for CONFLICTS (photo already has a different description).
   // Each row shows Current vs New with an approve checkbox; blanks were filled
   // automatically and are reported in the footer.
-  function openCsvReview(conflicts, info) {
+  function openCsvReview(conflicts, info, onDone) {
+    onDone = onDone || function () {};
     var ov = $('pr-csvreview');
     if (!ov) {
       ov = document.createElement('div'); ov.id = 'pr-csvreview';
@@ -281,6 +293,7 @@
       ov.classList.remove('on');
       renderBuilder();
       status('Filled ' + info.autoApplied + ' blank(s); ' + conflicts.length + ' conflict(s) left unchanged.');
+      onDone();
     };
     $('pr-cr-apply').onclick = function () {
       var byId = {}; (geo() ? geo().list() : []).forEach(function (p) { byId[p.id] = p; });
@@ -297,6 +310,7 @@
         status('Applied ' + (info.autoApplied + applied) + ' description(s) (' + applied + ' overwritten' +
           (info.autoApplied ? ', ' + info.autoApplied + ' blank filled' : '') + ')' +
           (info.unmatched ? ' · ' + info.unmatched + ' unmatched' : '') + '.');
+        onDone();
       });
     };
     ov.classList.add('on');
@@ -777,7 +791,11 @@
       '#pr-top .sp{flex:1 1 auto}' +
       '#pr-park{font:600 13px system-ui;padding:5px 8px;border:1px solid var(--rule,#DDD7C8);border-radius:6px;min-width:200px}' +
       '#pr-main{flex:1 1 auto;display:flex;min-height:0}' +
-      '#pr-tree{flex:0 0 250px;overflow:auto;border-right:1px solid var(--rule,#DDD7C8);padding:11px 12px;background:#fff}' +
+      '#pr-tree{flex:0 0 250px;overflow:auto;padding:11px 12px;background:#fff}' +
+      '#pr-split{flex:0 0 7px;cursor:col-resize;background:var(--rule,#DDD7C8);position:relative}' +
+      '#pr-split::after{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:2px;height:28px;border-radius:1px;background:#9aa3ad}' +
+      '#pr-split:hover{background:var(--blue,#0B3D66)}' +
+      '#pr-split:hover::after{background:#fff}' +
       '#pr-tree .prt-h{font:700 10.5px "IBM Plex Mono",monospace;color:#8a949f;letter-spacing:.07em;text-transform:uppercase;margin-bottom:9px}' +
       '#pr-tree .prt-empty{color:var(--mute,#9BA0A8);font:500 12px system-ui}' +
       '#pr-tree .prt-park{margin-bottom:7px}' +
@@ -854,7 +872,7 @@
             '<button class="pr-btn go" id="pr-go">Generate PDF</button>' +
             '<button class="pr-btn" id="pr-close">Close</button>' +
           '</div>' +
-          '<div id="pr-main"><div id="pr-tree"></div><div id="pr-body"></div></div>' +
+          '<div id="pr-main"><div id="pr-tree"></div><div id="pr-split" title="Drag to resize"></div><div id="pr-body"></div></div>' +
         '</div>';
       document.body.appendChild(ov);
       ov.addEventListener('click', function (e) { if (e.target === ov) closeOverlay(); });
@@ -873,12 +891,31 @@
       });
       var pb = $('pr-photobase');
       if (pb) pb.addEventListener('input', function () { try { localStorage.setItem('rw_report_photo_base', pb.value); } catch (e) {} });
+      // Draggable divider between the routes tree and the photo grid.
+      (function () {
+        var split = $('pr-split'), tree = $('pr-tree'), dragging = false, startX = 0, startW = 0;
+        if (!split || !tree) return;
+        split.addEventListener('mousedown', function (e) {
+          dragging = true; startX = e.clientX; startW = tree.getBoundingClientRect().width;
+          document.body.style.userSelect = 'none'; e.preventDefault();
+        });
+        document.addEventListener('mousemove', function (e) {
+          if (!dragging) return;
+          var w = Math.max(150, Math.min(startW + (e.clientX - startX), 640));
+          tree.style.flex = '0 0 ' + w + 'px';
+        });
+        document.addEventListener('mouseup', function () {
+          if (!dragging) return; dragging = false; document.body.style.userSelect = '';
+          try { localStorage.setItem('rw_report_tree_w', Math.round(tree.getBoundingClientRect().width)); } catch (e) {}
+        });
+      })();
     }
     ov.classList.add('on');
     // Reflect the global export-watermark setting (save/copy/print share it).
     var pw = $('pr-wm'); if (pw) { try { pw.checked = localStorage.getItem('rw_export_watermark') !== '0'; } catch (e) {} }
     var pn = $('pr-pagenums'); if (pn) { try { pn.checked = localStorage.getItem('rw_report_pagenums') !== '0'; } catch (e) {} }
     var pbx = $('pr-photobase'); if (pbx && !pbx.value) { try { pbx.value = localStorage.getItem('rw_report_photo_base') || ''; } catch (e) {} }
+    var trw = $('pr-tree'); if (trw) { try { var w = parseInt(localStorage.getItem('rw_report_tree_w'), 10); if (w) trw.style.flex = '0 0 ' + w + 'px'; } catch (e) {} }
     // Warm the route geometry so STA/MP are ready when Generate is clicked.
     if (window.RW2PhotoTag && window.RW2PhotoTag.ensureGeo) { try { window.RW2PhotoTag.ensureGeo(); } catch (e) {} }
     // Auto-fill the Park field with the full park name for the loaded park.
@@ -927,5 +964,11 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', whenReady);
   else whenReady();
 
-  window.RW2PhotoReport = { open: openOverlay, generate: generate, grouped: grouped, layoutFor: layoutFor, watermarkLines: watermarkLines, fmtSta: fmtSta };
+  window.RW2PhotoReport = {
+    open: openOverlay, generate: generate, grouped: grouped, layoutFor: layoutFor,
+    watermarkLines: watermarkLines, fmtSta: fmtSta,
+    // Reusable description-CSV I/O for other tabs (e.g. RIP Photos):
+    exportCsv: function (photos, base) { downloadCsvForPhotos(photos || [], (base != null ? base : reportBaseFolder())); },
+    importCsv: function (text, onDone) { importDescriptionsCsv(text, onDone); },
+  };
 })();
