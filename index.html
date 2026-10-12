@@ -31243,6 +31243,10 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
           (result.photos.length + ng) + ' photo' + ((result.photos.length + ng) !== 1 ? 's' : '') +
           ' · ' + ng + ' field · ' + grouped + ' grouped');
       }
+      // Show the "include photo images" opt-in when EITHER store has photos —
+      // field photos (geophotos) count too, not just legacy per-pin photos.
+      const optEl2 = document.getElementById('exp-photo-opt');
+      if (optEl2) optEl2.style.display = (result.photos.length + ng) > 0 ? 'flex' : 'none';
     } catch (e) {
       result.geophotos = [];
       console.warn('[RoadWalk] Export: geophotos read error', e);
@@ -31748,17 +31752,23 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       dlBtn.disabled   = false;
       progressEl.style.width = '100%';
 
-      // Estimate size: ~bundle JSON + ~2KB per inspection + ~300KB per photo
+      // Estimate size: ~bundle JSON + ~2KB per inspection + image bytes.
+      // Geophotos count too: ~0.5 KB of metadata each always ships; their
+      // base64 dataUrl only when "include images" is on (sum the real lengths).
+      const gp            = result.geophotos || [];
       const bundleBytes   = JSON.stringify(result.bundle || {}).length;
       const inspBytes     = result.inspections.length * 2048;
-      const photoBytes    = result.photos.length * 307200;   // ~300 KB each
-      const baseBytes     = bundleBytes + inspBytes + 10240; // +10 KB overhead
+      const gpMetaBytes   = gp.length * 512;
+      let   gpImgBytes    = 0; gp.forEach(function (g) { gpImgBytes += (g.dataUrl ? g.dataUrl.length : 0); });
+      const photoBytes    = result.photos.length * 307200 + gpImgBytes;   // ~300 KB each legacy
+      const baseBytes     = bundleBytes + inspBytes + gpMetaBytes + 10240; // +10 KB overhead
       const withPhotos    = baseBytes + photoBytes;
+      const anyPhotos     = (result.photos.length + gp.length) > 0;
       if (sizeEl) {
         sizeEl.innerHTML =
-          'Without photos: ~' + _fmtBytes(baseBytes) + '<br>' +
-          (result.photos.length > 0
-            ? 'With photos: ~' + _fmtBytes(withPhotos)
+          'Without images: ~' + _fmtBytes(baseBytes) + '<br>' +
+          (anyPhotos
+            ? 'With images: ~' + _fmtBytes(withPhotos)
             : 'No photos stored');
       }
     }).catch(function (err) {
