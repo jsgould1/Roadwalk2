@@ -121,7 +121,7 @@
 <script src="modules/photo-autotag.js?v=4" defer></script>
 <script src="modules/photo-route-view.js?v=4" defer></script>
 <script src="modules/photo-report.js?v=21" defer></script>
-<script src="modules/photo-dashboard.js?v=3" defer></script>
+<script src="modules/photo-dashboard.js?v=4" defer></script>
 
 <style>
 /* ============================================================
@@ -38066,7 +38066,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     if (exact) return exact;
     return nameMatches.length === 1 ? nameMatches[0] : null;
   }
-  function handleFiles(files, setName) {
+  function handleFiles(files, setName, onProgress) {
     var arr = Array.prototype.slice.call(files || []);
     if (!arr.length) return Promise.resolve({ added: 0, relinked: 0 });
     var map = rwMap();
@@ -38079,9 +38079,12 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     var maxSize = 1600;
     try { var _sv = parseInt(localStorage.getItem('rw_photo_maxsize'), 10); if (_sv) maxSize = _sv; } catch (e) {}
     var added = 0, relinked = 0, noGpsIdx = 0, total = arr.length, done = 0;
+    var bytesTotal = 0; for (var _bi = 0; _bi < arr.length; _bi++) bytesTotal += (arr[_bi].size || 0);
+    var bytesDone = 0;
     var preExisting = PHOTOS.slice();      // records that existed before this import
     var usedRelink = Object.create(null);  // ids already re-linked in this batch
     if (countEl) countEl.textContent = 'Importing 0 / ' + total + '…';
+    if (typeof onProgress === 'function') { try { onProgress({ done: 0, total: total, bytesDone: 0, bytesTotal: bytesTotal }); } catch (e) {} }
     var seq = Promise.resolve();
     arr.forEach(function (file) {
       seq = seq.then(function () {
@@ -38135,7 +38138,9 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         }).catch(function (e) { console.warn('[RoadWalk] photo import failed:', e); })
           .then(function () {
             done++;
+            bytesDone += (file.size || 0);
             if (countEl) countEl.textContent = 'Importing ' + done + ' / ' + total + '…';
+            if (typeof onProgress === 'function') { try { onProgress({ done: done, total: total, bytesDone: bytesDone, bytesTotal: bytesTotal }); } catch (e) {} }
           });
       });
     });
@@ -38245,7 +38250,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     save:        function (p) { return dbPut(p); },
     saveMany:    function (ps) { return Promise.all((ps || []).map(dbPut)); },
     // Import image files into a named photo set (folder). Returns Promise<n>.
-    importFiles: function (files, setName) { return handleFiles(files, setName); },
+    importFiles: function (files, setName, onProgress) { return handleFiles(files, setName, onProgress); },
     // Remove a photo entirely (from RAM + IDB, incl. its full-size original).
     remove:      function (id) {
       var i = PHOTOS.findIndex(function (p) { return p.id === id; });

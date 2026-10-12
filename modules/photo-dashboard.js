@@ -35,7 +35,12 @@
           + '<option value="800">800 px</option><option value="1200">1200 px</option><option value="1600">1600 px</option><option value="2400">2400 px</option></select></label>'
           + '<div style="font:500 11px system-ui;color:#9BA0A8;flex:1 1 100%;margin-top:2px">Full-size originals are always kept for save / copy / print — this only sizes the fast in-RAM display copy.</div>'
           + '</div>'
-          + '<div id="pd-drop" class="rw-dropzone" style="margin-top:10px"><span class="rw-dropzone-ico">⬇</span><span class="rw-dropzone-lbl">…or drag photos / folders here</span></div>')
+          + '<div id="pd-drop" class="rw-dropzone" style="margin-top:10px"><span class="rw-dropzone-ico">⬇</span><span class="rw-dropzone-lbl">…or drag photos / folders here</span></div>'
+          + '<div id="pd-prog" style="display:none;margin-top:10px">'
+          + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;font:600 12px system-ui;color:#0B3D66">'
+          + '<span id="pd-prog-txt">Uploading…</span><span id="pd-prog-sz" style="font-weight:500;color:#5b6673;white-space:nowrap"></span></div>'
+          + '<div style="margin-top:5px;height:7px;border-radius:4px;background:#e9edf2;overflow:hidden">'
+          + '<div id="pd-prog-bar" style="height:100%;width:0;background:#C85A2B;transition:width .12s"></div></div></div>')
       + card('', '<div style="font:700 13px system-ui;color:#0B3D66;margin-bottom:6px;letter-spacing:.3px">Photo sets · RAM</div><div id="pd-sets-host"></div>')
       + card('Tag &amp; report',
           '<div style="display:flex;flex-wrap:wrap;gap:8px">'
@@ -62,22 +67,54 @@
   function fileInput() { var i = document.createElement('input'); i.type = 'file'; i.multiple = true; i.accept = 'image/*'; i.style.display = 'none'; document.body.appendChild(i); return i; }
   function splitBySub(files) { var g = {}; Array.prototype.forEach.call(files, function (f) { var rel = f.webkitRelativePath || f.name, parts = rel.split('/'); var key = parts.length >= 3 ? parts[1] : (parts.length === 2 ? parts[0] : '(unsorted)'); (g[key] = g[key] || []).push(f); }); return g; }
   function oneSetName(files) { var rel = files[0] && (files[0].webkitRelativePath || files[0].name) || 'photos', parts = rel.split('/'); return parts.length >= 2 ? parts[0] : 'photos'; }
+  function fmtBytes(b) {
+    if (!b) return '0 KB';
+    if (b < 1048576) return Math.max(1, Math.round(b / 1024)) + ' KB';
+    if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB';
+    return (b / 1073741824).toFixed(2) + ' GB';
+  }
+  // Live upload progress in the Import card: file count + size, with a bar.
+  function dprogress(done, total, bytesDone, bytesTotal, setName) {
+    var box = $('pd-prog'); if (!box) return;
+    box.style.display = 'block';
+    var txt = $('pd-prog-txt'), sz = $('pd-prog-sz'), bar = $('pd-prog-bar');
+    if (txt) txt.textContent = 'Uploading ' + done + ' / ' + total + ' file' + (total === 1 ? '' : 's')
+      + (setName && setName !== '(unsorted)' ? ' · ' + setName : '');
+    if (sz) sz.textContent = fmtBytes(bytesDone) + ' / ' + fmtBytes(bytesTotal);
+    if (bar) bar.style.width = (total ? Math.round(done / total * 100) : 0) + '%';
+  }
+  function dprogressHide() { var box = $('pd-prog'); if (box) box.style.display = 'none'; }
+
   function importGroups(groups) {
     var g = geo(); if (!g) return;
     var names = Object.keys(groups), added = 0, relinked = 0;
+    // Grand totals across every group, so the bar reflects the whole import.
+    var allFiles = names.reduce(function (a, n) { return a.concat(groups[n]); }, []);
+    var grandTotal = allFiles.length;
+    var grandBytes = allFiles.reduce(function (a, f) { return a + (f.size || 0); }, 0);
+    var baseDone = 0, baseBytes = 0;
+    dprogress(0, grandTotal, 0, grandBytes, names.length === 1 ? names[0] : '');
     names.reduce(function (pr, name) {
       return pr.then(function () {
-        return g.importFiles(groups[name], name === '(unsorted)' ? null : name).then(function (r) {
+        var files = groups[name];
+        var onProg = function (p) {
+          dprogress(baseDone + p.done, grandTotal, baseBytes + p.bytesDone, grandBytes, name);
+        };
+        return g.importFiles(files, name === '(unsorted)' ? null : name, onProg).then(function (r) {
           added += (r && r.added) || 0; relinked += (r && r.relinked) || 0;
+          baseDone += files.length;
+          baseBytes += files.reduce(function (a, f) { return a + (f.size || 0); }, 0);
         });
       });
     }, Promise.resolve()).then(function () {
+      dprogressHide();
       stats();
       if (window.RW2PhotoSets && window.RW2PhotoSets.renderSets) { try { window.RW2PhotoSets.renderSets(); } catch (e) {} }
-      dstatus((added ? 'Imported ' + added + ' new photo(s). ' : '') + (relinked ? 'Re-linked ' + relinked + ' full-size original(s) to existing photos.' : ''));
+      dstatus((added ? 'Imported ' + added + ' new photo(s). ' : '') + (relinked ? 'Re-linked ' + relinked + ' full-size original(s) to existing photos.' : '')
+        + (!added && !relinked ? 'No new photos.' : ''));
       // Only offer tagging for genuinely new photos (re-linked ones are already tagged).
       if (added && window.RW2PhotoTag && window.RW2PhotoTag.wizard) { try { window.RW2PhotoTag.wizard({ added: added }); } catch (e) {} }
-    });
+    }, function (e) { dprogressHide(); dstatus('Import failed: ' + (e && e.message ? e.message : e)); });
   }
   function dstatus(msg) { var el = $('pd-status'); if (el) el.textContent = msg || ''; }
 
