@@ -425,6 +425,105 @@
     ov.classList.add('on');
   }
 
+  // ── Caption spell-check (offline, suggested fixes) ────────────────────────
+  // Uses RW2Spell (modules/spellcheck.js): lazy dictionary + pavement allowlist
+  // seeded from the rubric. Checks the captions of the photos currently selected
+  // for the report and opens a fix panel. Manual ("Check" button) — never gates
+  // the PDF.
+  function caseLike(src, repl) {
+    if (/^[A-Z][a-z’'-]*$/.test(src)) return repl.charAt(0).toUpperCase() + repl.slice(1);
+    if (/^[A-Z]+$/.test(src)) return repl.toUpperCase();
+    return repl;
+  }
+  function runSpellCheck() {
+    if (!window.RW2Spell) { status('Spell-check unavailable (module not loaded).'); return; }
+    var secs = selectedSections(grouped(true));
+    var photos = []; secs.forEach(function (s) { photos = photos.concat(s.photos); });
+    var items = photos.filter(function (p) { return (p.description || '').trim(); })
+                      .map(function (p) { return { id: p.id, text: p.description }; });
+    if (!items.length) { status('No captions to check — add descriptions first.'); return; }
+    var btn = $('pr-spell-btn'); if (btn) { btn.disabled = true; btn.textContent = '🔤 Checking…'; }
+    status('Loading dictionary…');
+    window.RW2Spell.checkItems(items).then(function (results) {
+      if (btn) { btn.disabled = false; btn.textContent = '🔤 Check'; }
+      if (!results.length) { status('No spelling issues found in ' + items.length + ' caption(s). ✓'); return; }
+      var nIssues = results.reduce(function (a, r) { return a + r.flags.length; }, 0);
+      status(nIssues + ' possible issue(s) across ' + results.length + ' caption(s).');
+      openSpellReview(results);
+    }).catch(function (e) {
+      if (btn) { btn.disabled = false; btn.textContent = '🔤 Check'; }
+      status('Spell-check failed: ' + (e && e.message || e));
+    });
+  }
+  function openSpellReview(results) {
+    ensureStyles();
+    var ov = $('pr-spellrev');
+    if (!ov) {
+      ov = document.createElement('div'); ov.id = 'pr-spellrev';
+      ov.innerHTML =
+        '<div class="pr-cr-card">' +
+          '<div class="pr-cr-head"><span class="pr-cr-t">🔤 Spell check</span>' +
+            '<span class="pr-cr-sub" id="pr-sp-sub"></span><span class="sp"></span></div>' +
+          '<div class="pr-cr-body" id="pr-sp-body"></div>' +
+          '<div class="pr-cr-ftr"><span id="pr-sp-status" style="font:500 11.5px system-ui;color:#8a949f"></span><span class="sp"></span>' +
+            '<button class="pr-btn go" id="pr-sp-apply">Apply fixes</button>' +
+            '<button class="pr-btn" id="pr-sp-close">Close</button></div>' +
+        '</div>';
+      document.body.appendChild(ov);
+      ov.addEventListener('click', function (e) { if (e.target === ov) ov.classList.remove('on'); });
+      $('pr-sp-close').addEventListener('click', function () { ov.classList.remove('on'); });
+    }
+    var body = $('pr-sp-body');
+    body.innerHTML = results.map(function (r) {
+      var chips = r.flags.map(function (f) {
+        var sugg = (f.suggestions || []).slice(0, 3).map(function (s) {
+          return '<button class="pr-sp-sugg" data-w="' + esc(f.word) + '" data-s="' + esc(s) + '">' + esc(caseLike(f.word, s)) + '</button>';
+        }).join('');
+        return '<span class="pr-sp-flag"><b>' + esc(f.word) + '</b>' + (sugg ? ' → ' + sugg : ' <i>no suggestion</i>') +
+          '<button class="pr-sp-ok" data-w="' + esc(f.word) + '" title="Keep this word (add to allowed for this session)">keep</button></span>';
+      }).join('');
+      return '<div class="pr-cr-row" data-id="' + esc(r.id) + '">' +
+        '<div class="pr-cr-thumb" data-img="' + esc(r.id) + '"></div>' +
+        '<div class="pr-cr-txt">' +
+          '<textarea class="pr-sp-ta" data-id="' + esc(r.id) + '">' + esc(r.text) + '</textarea>' +
+          '<div class="pr-sp-flags">' + chips + '</div>' +
+        '</div></div>';
+    }).join('');
+    Array.prototype.forEach.call(body.querySelectorAll('.pr-cr-thumb'), function (t) {
+      imageFor(t.getAttribute('data-img')).then(function (d) { if (d) t.style.backgroundImage = 'url(' + d + ')'; });
+    });
+    var grow = function (el) { el.style.height = 'auto'; el.style.height = (el.scrollHeight + 2) + 'px'; };
+    Array.prototype.forEach.call(body.querySelectorAll('.pr-sp-ta'), function (ta) { grow(ta); ta.addEventListener('input', function () { grow(ta); }); });
+    body.onclick = function (e) {
+      var btn = e.target.closest ? e.target.closest('.pr-sp-sugg, .pr-sp-ok') : null;
+      if (!btn) return;
+      var row = btn.closest('.pr-cr-row'), ta = row && row.querySelector('.pr-sp-ta'); if (!ta) return;
+      if (btn.classList.contains('pr-sp-sugg')) {
+        var w = btn.getAttribute('data-w'), s = btn.getAttribute('data-s');
+        var re = new RegExp('(^|[^A-Za-z])(' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')(?![A-Za-z])');
+        ta.value = ta.value.replace(re, function (m, pre) { return pre + caseLike(w, s); });
+        grow(ta);
+      } else if (window.RW2Spell) {
+        window.RW2Spell.addAllowed(btn.getAttribute('data-w').toLowerCase());
+      }
+      var flag = btn.closest('.pr-sp-flag'); if (flag) flag.classList.add('done');
+    };
+    $('pr-sp-sub').textContent = results.length + ' caption(s) with possible issues';
+    $('pr-sp-apply').onclick = function () {
+      var saves = [], n = 0, byId = {}; (geo() ? geo().list() : []).forEach(function (p) { byId[p.id] = p; });
+      Array.prototype.forEach.call(body.querySelectorAll('.pr-sp-ta'), function (ta) {
+        var p = byId[ta.getAttribute('data-id')]; if (!p) return;
+        var v = ta.value.trim();
+        if (v && v !== (p.description || '')) { p.description = v; saves.push(p); n++; }
+      });
+      Promise.all(saves.map(function (p) { try { return geo().save(p); } catch (e) { return null; } })).then(function () {
+        ov.classList.remove('on'); renderBuilder();
+        status(n ? ('Applied ' + n + ' caption fix(es).') : 'No changes to apply.');
+      });
+    };
+    ov.classList.add('on');
+  }
+
   function imageFor(id) {
     var ps = psets();
     if (ps && ps.imageFor) return ps.imageFor(id);
@@ -971,6 +1070,18 @@
       '.pr-cr-ftr{display:flex;align-items:center;gap:10px;padding:11px 16px;border-top:1px solid var(--rule,#DDD7C8);background:#fff}' +
       '.pr-cr-ftr .sp{flex:1 1 auto}' +
       '.pr-cr-ftr #pr-cr-status{font:500 11.5px system-ui;color:#8a949f}' +
+      // Spell-check fix panel (reuses .pr-cr-* card/head/body/ftr/thumb/row/txt).
+      '#pr-spellrev{position:fixed;inset:0;z-index:4250;background:rgba(20,22,28,.55);display:none}' +
+      '#pr-spellrev.on{display:flex}' +
+      '.pr-sp-ta{width:100%;box-sizing:border-box;border:1px solid #e3e8ee;border-radius:6px;font:500 13px/1.4 system-ui;color:#1A1D22;padding:7px 9px;resize:none;overflow:hidden;min-height:38px}' +
+      '.pr-sp-flags{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}' +
+      '.pr-sp-flag{font:600 11.5px system-ui;color:#9a5b4a;background:#f7eeeb;border:1px solid #e7d3cc;border-radius:6px;padding:3px 7px;display:inline-flex;align-items:center;gap:5px}' +
+      '.pr-sp-flag.done{color:#1b6b4a;background:#e7f1ea;border-color:#bcdccb;opacity:.75}' +
+      '.pr-sp-flag.done b{text-decoration:line-through}' +
+      '.pr-sp-flag b{font-weight:800}' +
+      '.pr-sp-sugg{border:1px solid #9cc3ad;background:#eef6f1;color:#1b6b4a;border-radius:5px;font:700 11px system-ui;padding:2px 7px;cursor:pointer}' +
+      '.pr-sp-sugg:hover{background:#dcefe4}' +
+      '.pr-sp-ok{border:1px solid #d3dae1;background:#fff;color:#55606b;border-radius:5px;font:700 10px system-ui;padding:2px 6px;cursor:pointer;margin-left:2px}' +
       // Toast: feedback when the builder is closed (import from RIP/File tab).
       '#pr-toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(8px);z-index:4400;max-width:min(560px,92vw);background:#16315E;color:#fff;font:600 12.5px/1.45 system-ui;padding:10px 16px;border-radius:9px;box-shadow:0 10px 34px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .18s,transform .18s}' +
       '#pr-toast.on{opacity:1;transform:translateX(-50%) translateY(0)}';
@@ -995,6 +1106,7 @@
             '<button class="pr-btn" id="pr-csv-out" title="Export a CSV of the selected photos (with file paths) so descriptions can be authored externally">⬇ Descr. CSV</button>' +
             '<label class="pr-btn" id="pr-csv-in-lbl" title="Import a CSV to apply descriptions to the matching photos" style="cursor:pointer;display:inline-flex;align-items:center">⬆ Import CSV<input type="file" id="pr-csv-in" accept=".csv,text/csv" style="display:none"></label>' +
             '<button class="pr-btn" id="pr-rubric-btn" title="Edit the description rubric (shipped with every exported CSV)">✎ Rubric</button>' +
+            '<button class="pr-btn" id="pr-spell-btn" title="Spell-check the captions of the photos shown (offline; suggests fixes)">🔤 Check</button>' +
             '<span id="pr-count" style="font:600 12px \'IBM Plex Mono\',monospace;color:var(--mute,#9BA0A8)">0 hearted</span>' +
             '<span class="sp"></span>' +
             '<span id="pr-status" style="font:500 11.5px system-ui;color:var(--mute,#9BA0A8)"></span>' +
@@ -1021,6 +1133,7 @@
       var pb = $('pr-photobase');
       if (pb) pb.addEventListener('input', function () { try { localStorage.setItem('rw_report_photo_base', pb.value); } catch (e) {} });
       var rbtn = $('pr-rubric-btn'); if (rbtn) rbtn.addEventListener('click', openRubricEditor);
+      var sbtn = $('pr-spell-btn'); if (sbtn) sbtn.addEventListener('click', runSpellCheck);
       // Draggable divider between the routes tree and the photo grid.
       (function () {
         var split = $('pr-split'), tree = $('pr-tree'), dragging = false, startX = 0, startW = 0;
