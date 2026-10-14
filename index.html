@@ -37830,6 +37830,14 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     });
     wrap.appendChild(t);
     wrap.appendChild(gal);
+    // Un-group the whole pile right from the gallery view.
+    var ungrp = document.createElement('button');
+    ungrp.className = 'muted';
+    ungrp.style.cssText = 'margin-top:8px;width:100%';
+    ungrp.textContent = '✕ Un-group these ' + members.length + ' photos';
+    ungrp.title = 'Dissolve this asset group — each photo becomes individual again';
+    ungrp.addEventListener('click', function () { dissolveGroup(focusedPhoto, m); });
+    wrap.appendChild(ungrp);
   }
   function showDetail(wrap, p, m, fromGallery) {
     wrap.innerHTML = '';
@@ -37972,11 +37980,21 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       actions.appendChild(unTagBtn);
     }
     if (p.asset_group_id) {
+      var grpN = _groupMembers(p).length;
       var unGrpBtn = document.createElement('button');
       unGrpBtn.className = 'muted';
-      unGrpBtn.textContent = '✕ Leave group';
-      unGrpBtn.addEventListener('click', function () { ungroupPhoto(p, m); });
+      unGrpBtn.textContent = '✕ Un-group' + (grpN > 2 ? ' all (' + grpN + ')' : '');
+      unGrpBtn.title = 'Dissolve this group — all ' + grpN + ' photos become individual again';
+      unGrpBtn.addEventListener('click', function () { dissolveGroup(p, m); });
       actions.appendChild(unGrpBtn);
+      if (grpN > 2) {
+        var leaveBtn = document.createElement('button');
+        leaveBtn.className = 'muted';
+        leaveBtn.textContent = '↤ Remove this photo';
+        leaveBtn.title = 'Remove just this photo from the group';
+        leaveBtn.addEventListener('click', function () { ungroupPhoto(p, m); });
+        actions.appendChild(leaveBtn);
+      }
     }
 
     // Picker container — populated when the user taps "Tag to nearby pin".
@@ -38103,12 +38121,24 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       render();
     });
   }
+  // Remove just THIS photo from its group. If that would leave a single photo
+  // alone in the group, clear that one too (a group of 1 isn't a group).
   function ungroupPhoto(p, m) {
+    var gid = p.asset_group_id;
     delete p.asset_group_id;
-    dbPut(p).then(function () {
-      if (m) m.closePopup();
-      render();
-    });
+    var tasks = [dbPut(p)];
+    if (gid) {
+      var remaining = PHOTOS.filter(function (x) { return x.asset_group_id === gid; });
+      if (remaining.length === 1) { delete remaining[0].asset_group_id; tasks.push(dbPut(remaining[0])); }
+    }
+    Promise.all(tasks).then(function () { if (m) m.closePopup(); render(); });
+  }
+  // Dissolve the WHOLE group — every member becomes an individual photo again.
+  function dissolveGroup(p, m) {
+    var gid = p.asset_group_id; if (!gid) { if (m) m.closePopup(); return; }
+    var members = PHOTOS.filter(function (x) { return x.asset_group_id === gid; });
+    members.forEach(function (x) { delete x.asset_group_id; });
+    Promise.all(members.map(function (x) { return dbPut(x); })).then(function () { if (m) m.closePopup(); render(); });
   }
 
   /* ===================== grouping mode ===================== */
