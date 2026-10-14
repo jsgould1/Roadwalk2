@@ -37868,7 +37868,8 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         (p.rip_route_name ? ' · ' + escapeHtml(p.rip_route_name) : '') +
         (p.rip_route_ft != null ? ' · ' + Math.round(p.rip_route_ft) + ' ft' : '') +
         (p.rip_route_fmss ? ' · FMSS ' + escapeHtml(p.rip_route_fmss) : '') +
-        (p.rip_route_ambig ? ' <span style="color:#C85A2B">(near 2+ routes)</span>' : '');
+        (p.rip_route_ambig ? ' <span style="color:#C85A2B">(near 2+ routes)</span>' : '') +
+        (p.rip_manual ? ' · 📌 manual' : '');
       meta.appendChild(rt);
     }
     if (p.rip_lot) {
@@ -37876,7 +37877,8 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       lt.style.cssText = 'margin-top:2px;font:600 11.5px system-ui;color:#5A8F3E';
       lt.innerHTML = '🅿️ ' + escapeHtml(p.rip_lot) +
         (p.rip_lot_name ? ' · ' + escapeHtml(p.rip_lot_name) : '') +
-        (p.rip_lot_inside ? ' · inside' : (p.rip_lot_ft != null ? ' · ' + Math.round(p.rip_lot_ft) + ' ft' : ''));
+        (p.rip_lot_inside ? ' · inside' : (p.rip_lot_ft != null ? ' · ' + Math.round(p.rip_lot_ft) + ' ft' : '')) +
+        (p.rip_manual ? ' · 📌 manual' : '');
       meta.appendChild(lt);
     }
 
@@ -37946,6 +37948,21 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
         }, function () { rtBtn.textContent = '📍 Tag to route'; rtBtn.disabled = false; });
       });
       actions.appendChild(rtBtn);
+    }
+    // Manually assign THIS photo to a route/lot (override auto-tag + lock it).
+    if (window.RW2PhotoTag && window.RW2PhotoTag.assignUI) {
+      var asgBtn = document.createElement('button');
+      asgBtn.textContent = '🎯 Assign route';
+      asgBtn.title = 'Manually assign this photo to a route / lot (overrides auto-tag and locks it)';
+      asgBtn.addEventListener('click', function () {
+        window.RW2PhotoTag.assignUI(p.id, function () {
+          try { m.setTooltipContent(tipFor(p)); } catch (e) {}
+          showDetail(wrap, p, m, fromGallery);     // rebuild popup → shows the new route/lot
+          var pop = m.getPopup(); if (pop) pop.update();
+          if (window.RW2RouteView && window.RW2RouteView.refresh) { try { window.RW2RouteView.refresh(); } catch (e) {} }
+        });
+      });
+      actions.appendChild(asgBtn);
     }
     if (p.linked_pin_id) {
       var unTagBtn = document.createElement('button');
