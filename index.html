@@ -4302,6 +4302,7 @@ body.rw-sld-photo-dragging .strip-pin {
 /* Icon action buttons overlaid on the popup image (same set as the RIP Photos cards). */
 .gp-pop-imgwrap { position: relative; }
 .gp-pop-acts { position: absolute; top: 8px; right: 8px; display: flex; gap: 7px; }
+.gp-pop-acts.gp-pop-acts-left { right: auto; left: 8px; }
 .gp-ib {
   width: 44px; height: 44px; border-radius: 50%; border: 0; cursor: pointer;
   font-size: 19px; line-height: 1; background: rgba(255,255,255,0.93); color: #0B3D66;
@@ -37957,21 +37958,6 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       });
       actions.appendChild(rtBtn);
     }
-    // Manually assign THIS photo to a route/lot (override auto-tag + lock it).
-    if (window.RW2PhotoTag && window.RW2PhotoTag.assignUI) {
-      var asgBtn = document.createElement('button');
-      asgBtn.textContent = '🎯 Assign route';
-      asgBtn.title = 'Manually assign this photo to a route / lot (overrides auto-tag and locks it)';
-      asgBtn.addEventListener('click', function () {
-        window.RW2PhotoTag.assignUI(p.id, function () {
-          try { m.setTooltipContent(tipFor(p)); } catch (e) {}
-          showDetail(wrap, p, m, fromGallery);     // rebuild popup → shows the new route/lot
-          var pop = m.getPopup(); if (pop) pop.update();
-          if (window.RW2RouteView && window.RW2RouteView.refresh) { try { window.RW2RouteView.refresh(); } catch (e) {} }
-        });
-      });
-      actions.appendChild(asgBtn);
-    }
     if (p.linked_pin_id) {
       var unTagBtn = document.createElement('button');
       unTagBtn.className = 'muted';
@@ -38039,6 +38025,25 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     sBtn.addEventListener('click', function (e) { e.stopPropagation(); if (window.RW2PhotoExport) window.RW2PhotoExport.save(p.id); });
     cluster.appendChild(hBtn); cluster.appendChild(cBtn); cluster.appendChild(sBtn);
     imgWrap.appendChild(cluster);
+    // Assign-route icon, top-LEFT of the photo (consistent with the other views).
+    if (window.RW2PhotoTag && window.RW2PhotoTag.assignUI) {
+      var lcluster = document.createElement('div');
+      lcluster.className = 'gp-pop-acts gp-pop-acts-left';
+      var aBtn = document.createElement('button');
+      aBtn.className = 'gp-ib'; aBtn.textContent = '🎯';
+      aBtn.title = 'Assign to a route / lot (override auto-tag)';
+      aBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        window.RW2PhotoTag.assignUI(p.id, function () {
+          try { m.setTooltipContent(tipFor(p)); } catch (e2) {}
+          showDetail(wrap, p, m, fromGallery);
+          var pop = m.getPopup(); if (pop) pop.update();
+          if (window.RW2RouteView && window.RW2RouteView.refresh) { try { window.RW2RouteView.refresh(); } catch (e2) {} }
+        });
+      });
+      lcluster.appendChild(aBtn);
+      imgWrap.appendChild(lcluster);
+    }
     box.appendChild(imgWrap);
     box.appendChild(meta);
     if (status) box.appendChild(status);
