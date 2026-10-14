@@ -843,7 +843,9 @@
           + '<button data-rip-copy="' + esc(p.id) + '" title="Copy image to clipboard" style="' + BTN + ';background:rgba(255,255,255,.92);color:#0B3D66">⧉</button>'
           + '<button data-rip-save="' + esc(p.id) + '" title="Save / download image" style="' + BTN + ';background:rgba(255,255,255,.92);color:#0B3D66">⤓</button>'
           + '<button data-rip-fly="' + esc(p.id) + '" title="Fly to this photo on the map" style="' + BTN + ';background:rgba(255,255,255,.92);color:#0B3D66">🗺</button>'
+          + '<button data-rip-assign="' + esc(p.id) + '" title="Assign to a route / lot (override auto-tag)" style="' + BTN + ';background:rgba(255,255,255,.92);color:#0B3D66">🎯</button>'
           + '</div>'
+          + (p.rip_manual ? '<span title="Manually assigned route/lot" style="position:absolute;top:4px;left:4px;z-index:2;background:rgba(255,255,255,.92);border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:11px;box-shadow:0 1px 4px rgba(0,0,0,.2)">📌</span>' : '')
           + '<textarea data-rip-cap="' + esc(p.id) + '" placeholder="Add description…" rows="2" '
           + 'style="width:100%;box-sizing:border-box;border:0;border-top:1px solid #eef1f4;font:500 13px/1.35 system-ui;color:#33414f;padding:6px 7px;resize:none;overflow:hidden;display:block;min-height:32px">'
           + esc(cap) + '</textarea>'
@@ -1038,6 +1040,7 @@
         '<div style="position:absolute;top:0;left:0;right:0;display:flex;gap:9px;align-items:center;padding:11px 16px;color:#fff;font:600 13px system-ui;background:linear-gradient(rgba(0,0,0,.6),transparent);z-index:2">'
         + '<span id="riplb-title" style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>'
         + '<a id="riplb-dl" download style="' + btn + '">⤓ Save</a>'
+        + '<button id="riplb-assign" style="' + btn + '">🎯 Route</button>'
         + '<button id="riplb-map" style="' + btn + '">🗺 Map</button>'
         + '<button id="riplb-close" style="' + btn + '">✕ Close</button></div>'
         + '<img id="riplb-img" alt="" style="max-width:97vw;max-height:90vh;object-fit:contain;border-radius:6px;background:#1b1d22">'
@@ -1057,7 +1060,10 @@
     if (p.rip_route) {
       let rm = p.rip_route + (p.rip_route_fmss ? ' · FMSS ' + p.rip_route_fmss : '');
       if (p.rip_route_mp != null) rm += ' · MP ' + Number(p.rip_route_mp).toFixed(2);
+      if (p.rip_manual) rm += ' · 📌 manual';
       bits.push(rm);
+    } else if (p.rip_lot) {
+      bits.push('🅿 ' + p.rip_lot + (p.rip_lot_name ? ' · ' + p.rip_lot_name : '') + (p.rip_manual ? ' · 📌 manual' : ''));
     }
     if (isFinite(Number(p.lat)) && isFinite(Number(p.lng))) bits.push(Number(p.lat).toFixed(6) + ', ' + Number(p.lng).toFixed(6) + (p.bearing != null && isFinite(Number(p.bearing)) ? ' · ' + Math.round(p.bearing) + '° (' + _cardinal(p.bearing) + ')' : ''));
     if (p.ts) { const d = new Date(p.ts); if (!isNaN(d.getTime())) bits.push(d.toLocaleString()); }
@@ -1065,6 +1071,10 @@
     document.getElementById('riplb-meta').innerHTML = bits.map((b) => esc(b)).join('<br>');
     // map jump
     document.getElementById('riplb-map').onclick = () => { ov.style.display = 'none'; flyToPhoto(p); };
+    // assign route/lot (override auto-tag); reopen to refresh the meta after.
+    document.getElementById('riplb-assign').onclick = () => {
+      if (window.RW2PhotoTag && window.RW2PhotoTag.assignUI) window.RW2PhotoTag.assignUI(_lbId, () => { try { render(); } catch (e) {} openLightbox(_lbId); });
+    };
     // Show the FULL-SIZE original in-app (falls back to the downscaled display
     // image for older photos with no stored original, or offloaded sets).
     const imgEl = document.getElementById('riplb-img');
@@ -1405,6 +1415,10 @@
       el.onmouseleave = () => photoHoverHide();
     });
     // Per-card quick actions: copy to clipboard, save/download, fly to on map.
+    host.querySelectorAll('[data-rip-assign]').forEach((b) => b.onclick = (e) => {
+      e.stopPropagation();
+      if (window.RW2PhotoTag && window.RW2PhotoTag.assignUI) window.RW2PhotoTag.assignUI(b.getAttribute('data-rip-assign'), () => render());
+    });
     host.querySelectorAll('[data-rip-copy]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); copyPhoto(b.getAttribute('data-rip-copy'), b); });
     host.querySelectorAll('[data-rip-save]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); savePhoto(b.getAttribute('data-rip-save')); });
     host.querySelectorAll('[data-rip-fly]').forEach((b) => b.onclick = (e) => {

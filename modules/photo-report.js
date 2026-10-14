@@ -926,6 +926,8 @@
           '<button class="pr-heart' + (p.hearted ? ' on' : '') + '" title="Include in report">' + (p.hearted ? '♥' : '♡') + '</button>' +
           '<div class="pr-thumb" data-img="' + esc(p.id) + '"></div>' +
           '<button class="pr-span' + (isFull ? ' full' : '') + '" title="Full-width or half-width in the report">' + (isFull ? '◼ Full' : '▭ Half') + '</button>' +
+          '<button class="pr-assign" title="Assign this photo to a route / lot (override auto-tag)">🎯</button>' +
+          (p.rip_manual ? '<span class="pr-manual" title="Manually assigned route/lot">📌</span>' : '') +
           '<textarea class="pr-cap" rows="2" placeholder="Caption / description…">' + esc(p.description || '') + '</textarea>' +
           '</div>';
       }).join('');
@@ -953,6 +955,11 @@
         p.rip_rpt_span = next; try { geo().save(p); } catch (e) {}
         span.classList.toggle('full', next === 'full');
         span.textContent = next === 'full' ? '◼ Full' : '▭ Half';
+      });
+      var asg = card.querySelector('.pr-assign');
+      if (asg) asg.addEventListener('click', function () {
+        if (window.RW2PhotoTag && window.RW2PhotoTag.assignUI) window.RW2PhotoTag.assignUI(id, function () { renderBuilder(); });
+        else status('Assign unavailable (auto-tag module not loaded).');
       });
       var cap = card.querySelector('.pr-cap');
       var grow = function () { cap.style.height = 'auto'; cap.style.height = (cap.scrollHeight + 2) + 'px'; };
@@ -1041,6 +1048,9 @@
       '.pr-heart.on{background:#C85A2B;color:#fff}' +
       '.pr-span{align-self:flex-start;font:700 10.5px system-ui;padding:3px 8px;border-radius:6px;border:1px solid var(--rule,#DDD7C8);background:#fff;color:#5b6673;cursor:pointer}' +
       '.pr-span.full{background:#16315E;color:#fff;border-color:#16315E}' +
+      '.pr-assign{align-self:flex-start;font:700 11px system-ui;padding:3px 7px;border-radius:6px;border:1px solid var(--rule,#DDD7C8);background:#fff;color:#0B3D66;cursor:pointer}' +
+      '.pr-assign:hover{background:#eef2f6}' +
+      '.pr-manual{position:absolute;top:8px;left:34px;z-index:3;font-size:13px;line-height:1;filter:drop-shadow(0 1px 1px rgba(0,0,0,.3))}' +
       '.pr-cap{font:500 12.5px system-ui;line-height:1.4;border:1px solid var(--rule,#DDD7C8);border-radius:5px;padding:7px 9px;resize:vertical;width:100%;min-height:42px;overflow:hidden;box-sizing:border-box}' +
       '.pr-btn{font:600 12.5px system-ui;padding:6px 12px;border-radius:7px;border:1px solid var(--rule,#DDD7C8);background:#fff;cursor:pointer}' +
       '.pr-btn.go{background:var(--orange,#C85A2B);color:#fff;border-color:var(--orange,#C85A2B)}' +

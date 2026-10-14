@@ -25,6 +25,8 @@
 (function () {
   'use strict';
 
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
   // Park (unit) code from a route/lot ident: "WRBR-0010AZ" -> "WRBR".
   function parkCodeOf(ident) {
     if (!ident) return '';
@@ -272,8 +274,12 @@
       // list, but re-tagging it against the currently-loaded park could wrongly
       // reassign or clear tags it was given under a different park. Load a set to
       // re-tag it. (p.dataUrl present == loaded.)
-      var offloadedSkipped = 0;
-      var pick = base.filter(function (p) { if (p.dataUrl) return true; offloadedSkipped++; return false; });
+      var offloadedSkipped = 0, manualSkipped = 0;
+      var pick = base.filter(function (p) {
+        if (p.rip_manual) { manualSkipped++; return false; }   // manual assignment is locked — never auto-overwrite
+        if (p.dataUrl) return true;
+        offloadedSkipped++; return false;
+      });
       var scanned = 0, taggedRt = 0, taggedLot = 0, ambig = 0, noGps = 0, cleared = 0;
       var byRoute = {}, changed = [];
 
@@ -323,7 +329,7 @@
       return Promise.resolve(g.saveMany(changed)).then(function () {
         try { g.refresh(); } catch (e) {}
         return { ok: true, scanned: scanned, taggedRt: taggedRt, taggedLot: taggedLot, ambig: ambig,
-                 noGps: noGps, cleared: cleared, offloadedSkipped: offloadedSkipped,
+                 noGps: noGps, cleared: cleared, offloadedSkipped: offloadedSkipped, manualSkipped: manualSkipped,
                  routes: ROUTES.length, lots: LOTS.length, byRoute: byRoute, maxFt: maxFt };
       });
     });
@@ -385,6 +391,7 @@
                     .map(function (k) { return k + ' (' + r.byRoute[k] + ')'; }).join(', ');
         status('Tagged ' + r.taggedRt + ' to roads, ' + r.taggedLot + ' to lots, of ' + r.scanned +
                ' loaded GPS photos · ' + r.ambig + ' near 2+ roads' + (r.cleared ? ' · ' + r.cleared + ' cleared' : '') +
+               (r.manualSkipped ? ' · ' + r.manualSkipped + ' manually locked' : '') +
                (r.offloadedSkipped ? ' · ' + r.offloadedSkipped + ' offloaded skipped' : '') +
                (top ? ' · top: ' + top : ''));
         // refresh the "View by route" dropdown so the new routes appear
@@ -503,12 +510,146 @@
     document.getElementById('patw-ov').classList.add('on');
   }
 
+  // ---- manual assignment (override the auto-tag) -----------------------------
+  function lotByIdent(id) { for (var i = 0; i < LOTS.length; i++) if (LOTS[i].ident === id) return LOTS[i]; return null; }
+  function byIdent(a, b) { return a.ident < b.ident ? -1 : a.ident > b.ident ? 1 : 0; }
+
+  // Assign a photo to a route OR lot explicitly and LOCK it (rip_manual) so a
+  // future auto-tag run won't overwrite it. Clears the other dimension so the
+  // Photos-tab grouping (inside-lot > route > lot) moves the photo as intended.
+  function assignTarget(id, ident, kind) {
+    var g = geo(); if (!g || !g.get) return Promise.resolve(false);
+    var p = g.get(id); if (!p) return Promise.resolve(false);
+    return ensureGeo(false).then(function () {
+      var lat = Number(p.lat), lng = Number(p.lng), hasGps = isFinite(lat) && isFinite(lng) && !(lat === 0 && lng === 0);
+      if (kind === 'lot') {
+        var lg = lotByIdent(ident);
+        p.rip_lot = ident; p.rip_lot_name = lg ? lg.name : ''; p.rip_lot_fmss = lg ? lg.fmss : '';
+        p.rip_lot_inside = true;
+        p.rip_lots = [{ ident: ident, name: p.rip_lot_name, fmss: p.rip_lot_fmss, inside: true, ft: 0 }];
+        p.rip_route = ''; p.rip_route_name = ''; p.rip_route_fmss = ''; p.rip_route_ft = null;
+        p.rip_route_ambig = false; p.rip_route_sta = null; p.rip_route_mp = null; p.rip_routes = [];
+      } else {
+        var rg = routeByIdent(ident);
+        p.rip_route = ident; p.rip_route_name = rg ? rg.name : ''; p.rip_route_fmss = rg ? rg.fmss : '';
+        p.rip_route_ambig = false; p.rip_route_ft = null;
+        if (rg && hasGps) {
+          var pr = projectStation(lat, lng, rg);
+          p.rip_route_sta = Math.round(pr.sta);
+          var mp = mpFor(rg, pr.sta, pr.total); p.rip_route_mp = (mp != null ? Math.round(mp * 100) / 100 : null);
+          p.rip_route_ft = Math.round(pr.ft * 10) / 10;
+        } else { p.rip_route_sta = null; p.rip_route_mp = null; }
+        p.rip_routes = [{ ident: ident, name: p.rip_route_name, fmss: p.rip_route_fmss, ft: p.rip_route_ft }];
+        p.rip_lot = ''; p.rip_lot_name = ''; p.rip_lot_fmss = ''; p.rip_lot_inside = false; p.rip_lots = [];
+      }
+      p.rip_park = parkCodeOf(ident) || p.rip_park;
+      p.rip_manual = true;
+      return Promise.resolve(g.save(p)).then(function () { try { g.refresh(); } catch (e) {} return true; });
+    });
+  }
+
+  // Remove the manual lock and re-derive the tag from GPS (reverts to auto).
+  function clearManual(id) {
+    var g = geo(); if (!g || !g.get) return Promise.resolve(false);
+    var p = g.get(id); if (!p) return Promise.resolve(false);
+    delete p.rip_manual;
+    return Promise.resolve(g.save(p)).then(function () { return tagPhotos(p.rip_tag_ft || 30, [id]); });
+  }
+
+  // Routes + lots of the loaded park, for the assignment picker.
+  function targetsList() {
+    return ensureGeo(false).then(function () {
+      return {
+        routes: ROUTES.map(function (r) { return { ident: r.ident, name: r.name }; }).sort(byIdent),
+        lots: LOTS.map(function (l) { return { ident: l.ident, name: l.name }; }).sort(byIdent)
+      };
+    });
+  }
+
+  function ensureAssignStyles() {
+    if (document.getElementById('pat-asg-style')) return;
+    var st = document.createElement('style'); st.id = 'pat-asg-style';
+    st.textContent =
+      '#pat-asg{position:fixed;inset:0;z-index:4360;background:rgba(20,22,28,.55);display:none;align-items:center;justify-content:center}' +
+      '#pat-asg.on{display:flex}' +
+      '#pat-asg .card{width:min(460px,94vw);max-height:84vh;background:var(--paper,#FBFAF6);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.45);font-family:system-ui}' +
+      '#pat-asg .hd{padding:12px 15px;border-bottom:1px solid var(--rule,#DDD7C8);background:#fff;font-weight:800;color:#16315E;font-size:14.5px}' +
+      '#pat-asg .srch{margin:10px 14px 0;padding:7px 10px;border:1px solid var(--rule,#DDD7C8);border-radius:8px;font:500 13px system-ui}' +
+      '#pat-asg .list{flex:1 1 auto;overflow:auto;padding:4px 10px 12px;margin-top:8px}' +
+      '#pat-asg .sec{font:800 10px system-ui;letter-spacing:.07em;text-transform:uppercase;color:#9BA0A8;margin:8px 6px 4px}' +
+      '#pat-asg .opt{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:7px;cursor:pointer}' +
+      '#pat-asg .opt:hover{background:#eef2f6}' +
+      '#pat-asg .opt.cur{background:#e7f1ea}' +
+      '#pat-asg .opt .id{font:700 12px "IBM Plex Mono",monospace;color:#0B3D66;white-space:nowrap}' +
+      '#pat-asg .opt.cur .id{color:#1b6b4a}' +
+      '#pat-asg .opt .nm{font:500 12px system-ui;color:#5b6673;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#pat-asg .revert{margin:4px 6px 2px;border:1px dashed #c6a15a;background:#fdf6e3;color:#8a6d1d;border-radius:7px;padding:7px 9px;cursor:pointer;font:700 12px system-ui;width:calc(100% - 12px);text-align:left}' +
+      '#pat-asg .ftr{padding:10px 14px;border-top:1px solid var(--rule,#DDD7C8);background:#fff;display:flex;gap:8px;align-items:center}' +
+      '#pat-asg .ftr .sp{flex:1}' +
+      '#pat-asg .ftr button{font:700 12.5px system-ui;padding:7px 12px;border-radius:8px;border:1px solid var(--rule,#DDD7C8);background:#fff;cursor:pointer}' +
+      '#pat-asg .warn{padding:14px;color:#C85A2B;font:600 12.5px system-ui}';
+    document.head.appendChild(st);
+  }
+
+  // Shared picker — used by the lightbox, the Photos-tab card, and the report
+  // builder. onDone() runs after an assign/revert so the caller can refresh.
+  function assignUI(id, onDone) {
+    ensureAssignStyles();
+    var g = geo(); var p = g && g.get ? g.get(id) : null; if (!p) return;
+    onDone = onDone || function () {};
+    var ov = document.getElementById('pat-asg');
+    if (!ov) {
+      ov = document.createElement('div'); ov.id = 'pat-asg';
+      ov.innerHTML = '<div class="card">' +
+        '<div class="hd">Assign photo → route / lot</div>' +
+        '<input class="srch" id="pat-asg-srch" placeholder="Filter by ID or name…" spellcheck="false">' +
+        '<div class="list" id="pat-asg-list"></div>' +
+        '<div class="ftr"><span id="pat-asg-cur" style="font:600 11.5px system-ui;color:#8a949f"></span><span class="sp"></span>' +
+        '<button id="pat-asg-close">Close</button></div></div>';
+      document.body.appendChild(ov);
+      ov.addEventListener('click', function (e) { if (e.target === ov) ov.classList.remove('on'); });
+      document.getElementById('pat-asg-close').onclick = function () { ov.classList.remove('on'); };
+    }
+    var curIdent = (p.rip_lot && p.rip_lot_inside) ? p.rip_lot : (p.rip_route || p.rip_lot || '');
+    document.getElementById('pat-asg-cur').textContent = (p.rip_manual ? 'Manual: ' : 'Auto: ') + (curIdent || 'unassigned');
+    var list = document.getElementById('pat-asg-list');
+    var srch = document.getElementById('pat-asg-srch'); srch.value = '';
+    list.innerHTML = '<div class="warn" style="color:#8a949f">Loading routes…</div>';
+    ov.classList.add('on');
+    targetsList().then(function (t) {
+      if (!t.routes.length && !t.lots.length) { list.innerHTML = '<div class="warn">No park loaded — open an NPS park in RIP so there are routes/lots to assign.</div>'; return; }
+      function draw(filter) {
+        filter = (filter || '').toLowerCase();
+        function match(o) { return !filter || o.ident.toLowerCase().indexOf(filter) !== -1 || (o.name || '').toLowerCase().indexOf(filter) !== -1; }
+        var rs = t.routes.filter(match), ls = t.lots.filter(match), html = '';
+        html += '<button class="revert" id="pat-asg-revert">↺ Revert to auto-tag (clear manual lock)</button>';
+        if (rs.length) html += '<div class="sec">Routes</div>' + rs.map(function (o) {
+          return '<div class="opt' + (o.ident === curIdent ? ' cur' : '') + '" data-ident="' + esc(o.ident) + '" data-kind="route"><span class="id">' + esc(o.ident) + '</span><span class="nm">' + esc(o.name || '') + '</span></div>';
+        }).join('');
+        if (ls.length) html += '<div class="sec">Parking lots</div>' + ls.map(function (o) {
+          return '<div class="opt' + (o.ident === curIdent ? ' cur' : '') + '" data-ident="' + esc(o.ident) + '" data-kind="lot"><span class="id">🅿 ' + esc(o.ident) + '</span><span class="nm">' + esc(o.name || '') + '</span></div>';
+        }).join('');
+        if (!rs.length && !ls.length) html += '<div class="warn">No matching route or lot.</div>';
+        list.innerHTML = html;
+      }
+      draw('');
+      srch.oninput = function () { draw(srch.value); };
+      list.onclick = function (e) {
+        var rev = e.target.closest ? e.target.closest('#pat-asg-revert') : null;
+        if (rev) { rev.disabled = true; clearManual(id).then(function () { ov.classList.remove('on'); onDone(); }); return; }
+        var opt = e.target.closest ? e.target.closest('.opt') : null; if (!opt) return;
+        assignTarget(id, opt.getAttribute('data-ident'), opt.getAttribute('data-kind')).then(function () { ov.classList.remove('on'); onDone(); });
+      };
+    });
+  }
+
   // ---- public API ------------------------------------------------------------
   window.RW2PhotoTag = {
     tagPhotos: tagPhotos,
     wizard: wizard,
     ensureGeo: ensureGeo,
     station: station,
+    assignTarget: assignTarget, clearManual: clearManual, targetsList: targetsList, assignUI: assignUI,
     nearbyRoutes: nearbyRoutes,
     nearbyLots: nearbyLots,
     counts: function () { return { routes: ROUTES.length, lots: LOTS.length, builtFor: _builtFor }; },
