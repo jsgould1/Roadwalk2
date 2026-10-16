@@ -37647,7 +37647,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       '.gp-hg-head{font:600 11.5px system-ui;color:#0B3D66;margin-bottom:7px}' +
       // larger LANDSCAPE tiles in a 2-row grid (columns set inline per count)
       '.gp-hg-grid{display:grid;gap:7px;max-height:62vh;overflow:auto}' +
-      '.gp-hg-tile{width:150px;height:112px;border-radius:7px;border:1px solid #e3e8ee;background:#f4f1e8 center/cover no-repeat;cursor:pointer;padding:0;position:relative;font-size:26px;color:#9BA0A8;display:flex;align-items:center;justify-content:center}' +
+      '.gp-hg-tile{width:300px;height:224px;border-radius:7px;border:1px solid #e3e8ee;background:#f4f1e8 center/cover no-repeat;cursor:pointer;padding:0;position:relative;font-size:34px;color:#9BA0A8;display:flex;align-items:center;justify-content:center}' +
       '.gp-hg-tile.hearted{box-shadow:0 0 0 2px #C85A2B;border-color:#C85A2B}' +
       '.gp-hg-tile:hover{outline:2px solid #0B3D66;outline-offset:1px}' +
       '.gp-hg-more{font:500 10.5px system-ui;color:#8a949f;margin-top:5px;text-align:center}';
@@ -37661,7 +37661,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     if (map && !_hgWired) { _hgWired = true; map.on('movestart zoomstart', _hgHide); }
     return _hgEl;
   }
-  function _hgScheduleHide() { if (_hgHideT) clearTimeout(_hgHideT); _hgHideT = setTimeout(function () { if (!_hgOver) _hgHide(); }, 280); }
+  function _hgScheduleHide() { if (_hgHideT) clearTimeout(_hgHideT); _hgHideT = setTimeout(function () { if (!_hgOver) _hgHide(); }, 1780); }
   function _hgHide() { if (_hgHideT) { clearTimeout(_hgHideT); _hgHideT = null; } if (_hgEl) _hgEl.style.display = 'none'; }
   function _hgMarkersNear(hoverMarker) {
     var map = rwMap(); if (!map) return [];
@@ -37701,7 +37701,7 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     var cols = Math.min(4, Math.max(2, Math.ceil(shown.length / 2)));
     if (shown.length === 1) cols = 1;
     _hgEl.innerHTML = '<div class="gp-hg-head">' + markers.length + ' photos here · click to open</div>' +
-      '<div class="gp-hg-grid" style="grid-template-columns:repeat(' + cols + ',150px)">' + tiles + '</div>' +
+      '<div class="gp-hg-grid" style="grid-template-columns:repeat(' + cols + ',300px)">' + tiles + '</div>' +
       (markers.length > HG_MAX_TILES ? '<div class="gp-hg-more">+' + (markers.length - HG_MAX_TILES) + ' more</div>' : '');
     _hgEl.style.display = 'block';
     Array.prototype.forEach.call(_hgEl.querySelectorAll('.gp-hg-tile'), function (b) {
