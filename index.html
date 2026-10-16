@@ -4302,7 +4302,6 @@ body.rw-sld-photo-dragging .strip-pin {
 /* Icon action buttons overlaid on the popup image (same set as the RIP Photos cards). */
 .gp-pop-imgwrap { position: relative; }
 .gp-pop-acts { position: absolute; top: 8px; right: 8px; display: flex; gap: 7px; }
-.gp-pop-acts.gp-pop-acts-left { right: auto; left: 8px; }
 .gp-ib {
   width: 44px; height: 44px; border-radius: 50%; border: 0; cursor: pointer;
   font-size: 19px; line-height: 1; background: rgba(255,255,255,0.93); color: #0B3D66;
@@ -37650,6 +37649,11 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       '.gp-hg-tile{width:300px;height:224px;border-radius:7px;border:1px solid #e3e8ee;background:#f4f1e8 center/cover no-repeat;cursor:pointer;padding:0;position:relative;font-size:34px;color:#9BA0A8;display:flex;align-items:center;justify-content:center}' +
       '.gp-hg-tile.hearted{box-shadow:0 0 0 2px #C85A2B;border-color:#C85A2B}' +
       '.gp-hg-tile:hover{outline:2px solid #0B3D66;outline-offset:1px}' +
+      // per-tile action cluster (heart/copy/save/target) — slightly smaller than the popup's
+      '.gp-hg-acts{position:absolute;top:5px;right:5px;display:flex;gap:4px;z-index:2}' +
+      '.gp-hg-ib{width:30px;height:30px;border-radius:50%;border:0;cursor:pointer;font-size:14px;line-height:1;background:rgba(255,255,255,.93);color:#0B3D66;box-shadow:0 1px 4px rgba(0,0,0,.3);padding:0;display:flex;align-items:center;justify-content:center}' +
+      '.gp-hg-ib.gp-hg-heart{color:#C85A2B}' +
+      '.gp-hg-ib.on{background:#C85A2B;color:#fff}' +
       '.gp-hg-more{font:500 10.5px system-ui;color:#8a949f;margin-top:5px;text-align:center}';
     document.head.appendChild(st);
     _hgEl = document.createElement('div');
@@ -37692,9 +37696,15 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     var tiles = shown.map(function (mk) {
       var p = byId[mk._gpPhotoId]; if (!p) return '';
       var src = p.dataUrl || '';
-      return '<button class="gp-hg-tile' + (p.hearted ? ' hearted' : '') + '" data-gid="' + escapeHtml(p.id) + '"' +
+      return '<div class="gp-hg-tile' + (p.hearted ? ' hearted' : '') + '" data-gid="' + escapeHtml(p.id) + '"' +
         (src ? ' style="background-image:url(' + src + ')"' : ' data-off="1"') +
-        ' title="' + escapeHtml(p._name || '') + '">' + (src ? '' : '☁') + '</button>';
+        ' title="' + escapeHtml(p._name || '') + '">' + (src ? '' : '<span class="gp-hg-ph">☁</span>') +
+        '<div class="gp-hg-acts">' +
+          '<button class="gp-hg-ib gp-hg-heart' + (p.hearted ? ' on' : '') + '" data-act="heart" title="Heart = include in report">' + (p.hearted ? '♥' : '♡') + '</button>' +
+          '<button class="gp-hg-ib" data-act="copy" title="Copy image to clipboard">⧉</button>' +
+          '<button class="gp-hg-ib" data-act="save" title="Save full-size image">⤓</button>' +
+          '<button class="gp-hg-ib" data-act="target" title="Assign to a route / lot (override auto-tag)">🎯</button>' +
+        '</div></div>';
     }).join('');
     // Aim for a wide, ~2-row landscape grid: columns = ceil(n/2), capped at 4
     // (so 4→2x2, 6→2x3, 8→2x4; more than 8 keeps 4 cols and scrolls).
@@ -37713,9 +37723,29 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
       // Offloaded photos have no in-RAM thumb — fetch it from the blob store.
       if (b.getAttribute('data-off') && window.RW2PhotoSets && window.RW2PhotoSets.imageFor) {
         window.RW2PhotoSets.imageFor(id).then(function (url) {
-          if (url) { b.style.backgroundImage = 'url(' + url + ')'; b.textContent = ''; b.removeAttribute('data-off'); }
+          if (url) { b.style.backgroundImage = 'url(' + url + ')'; var ph = b.querySelector('.gp-hg-ph'); if (ph) ph.remove(); b.removeAttribute('data-off'); }
         }).catch(function () {});
       }
+      // Per-tile actions (heart / copy / save / assign) — stop the tile's open click.
+      Array.prototype.forEach.call(b.querySelectorAll('.gp-hg-ib'), function (btn) {
+        btn.onclick = function (e) {
+          e.stopPropagation();
+          var p = byId[id]; if (!p) return;
+          var act = btn.getAttribute('data-act');
+          if (act === 'heart') {
+            p.hearted = !p.hearted;
+            dbPut(p).then(function () {
+              btn.classList.toggle('on', !!p.hearted); btn.textContent = p.hearted ? '♥' : '♡';
+              b.classList.toggle('hearted', !!p.hearted);
+              var mk = _hgMarkerById(id), mel = mk && mk.getElement ? mk.getElement() : null;
+              if (mel) mel.classList.toggle('gp-hearted', !!p.hearted);
+              if (window.RW2PhotoReport && document.getElementById('pr-overlay') && document.getElementById('pr-overlay').classList.contains('on')) { try { window.RW2PhotoReport.open(); } catch (_) {} }
+            });
+          } else if (act === 'copy') { if (window.RW2PhotoExport) window.RW2PhotoExport.copy(id, btn); }
+          else if (act === 'save') { if (window.RW2PhotoExport) window.RW2PhotoExport.save(id); }
+          else if (act === 'target') { _hgHide(); if (window.RW2PhotoTag && window.RW2PhotoTag.assignUI) window.RW2PhotoTag.assignUI(id, function () {}); }
+        };
+      });
     });
     // Position next to the cluster point, clamped to the viewport.
     var pt = map.latLngToContainerPoint(hoverMarker.getLatLng());
@@ -38024,11 +38054,8 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
     sBtn.className = 'gp-ib'; sBtn.textContent = '⤓'; sBtn.title = 'Save full-size image';
     sBtn.addEventListener('click', function (e) { e.stopPropagation(); if (window.RW2PhotoExport) window.RW2PhotoExport.save(p.id); });
     cluster.appendChild(hBtn); cluster.appendChild(cBtn); cluster.appendChild(sBtn);
-    imgWrap.appendChild(cluster);
-    // Assign-route icon, top-LEFT of the photo (consistent with the other views).
+    // Assign-route icon in the SAME top-right cluster (heart/copy/save/target).
     if (window.RW2PhotoTag && window.RW2PhotoTag.assignUI) {
-      var lcluster = document.createElement('div');
-      lcluster.className = 'gp-pop-acts gp-pop-acts-left';
       var aBtn = document.createElement('button');
       aBtn.className = 'gp-ib'; aBtn.textContent = '🎯';
       aBtn.title = 'Assign to a route / lot (override auto-tag)';
@@ -38041,9 +38068,9 @@ console.log('%c[RoadWalk] BUILD v20260514 loaded OK', 'color:#16a34a;font-weight
           if (window.RW2RouteView && window.RW2RouteView.refresh) { try { window.RW2RouteView.refresh(); } catch (e2) {} }
         });
       });
-      lcluster.appendChild(aBtn);
-      imgWrap.appendChild(lcluster);
+      cluster.appendChild(aBtn);
     }
+    imgWrap.appendChild(cluster);
     box.appendChild(imgWrap);
     box.appendChild(meta);
     if (status) box.appendChild(status);
