@@ -660,8 +660,9 @@
         var pagesHtml = '';
         secs.forEach(function (s) {
           var usable = s.photos.filter(function (p) { return img[p.id]; });
-          // pack into span-aware rows (full = 1 row, half = paired), 3 rows/page
-          var pages = paginateRows(packRows(usable), 3);
+          // pack into span-aware rows; 4 units/page so TWO full photos share one
+          // page (each at half-page height), or up to 4 half-rows stack.
+          var pages = paginateRows(packRows(usable), 4);
           var routeId = (s.key === UNASSIGNED) ? 'Unassigned' : (s.key.indexOf('lot:') === 0 ? s.key.slice(4) : s.key);
           var code2 = parkCodeOf(s.key);
           var park = (singlePark && fieldVal) ? fieldVal : (parkFullName(code2) || fieldVal || _parkName || code2 || 'Field Photos');
@@ -813,20 +814,23 @@
       '.grid{flex:1 1 auto;display:flex;flex-direction:column;gap:0.16in;min-height:0}' +
       '.prow{flex:1 1 0;display:flex;flex-direction:column;min-height:0}' +
       '.prow.full{flex:2 1 0}' +   // full-width photo = two row units tall
-      '.prow-imgs{flex:1 1 auto;display:flex;gap:0.16in;min-height:0}' +
-      '.prow-imgs .imgbox{flex:1 1 0}' +
-      // a lone half-width photo stays half width (left), not stretched full
+      // Photos keep a true 4:3 frame and are NEVER trimmed: each image is the
+      // largest 4:3 that fits its row band, centered, with blank space left over
+      // where needed. Full = height-driven (fills the band height); half / lone =
+      // capped to half the content width.
+      '.prow-imgs{flex:1 1 auto;display:flex;gap:0.16in;min-height:0;justify-content:center;align-items:center}' +
+      '.prow-imgs .imgbox{max-width:100%;max-height:100%}' +
+      '.prow.full .prow-imgs .imgbox{aspect-ratio:4/3;height:100%;width:auto}' +  // full: fill the band height, width from 4:3
+      '.prow:not(.full) .prow-imgs .imgbox{width:calc(50% - 0.08in)}' +           // half/lone: half content width
+      '.prow:not(.full) .prow-imgs .imgbox::before{content:"";display:block;padding-top:75%}' +  // ...height from 4:3 (reliable in flex)
       '.prow.lone .prow-imgs{justify-content:flex-start}' +
-      '.prow.lone .prow-imgs .imgbox{flex:0 0 calc(50% - 0.08in)}' +
-      '.prow.lone .prow-caps .cap{flex:0 0 calc(50% - 0.08in)}' +
-      '.prow-caps{flex:0 0 auto;display:flex;gap:0.16in;padding-top:3px}' +
-      '.prow-caps .cap{flex:1 1 0;min-width:0}' +
-      // engineering look: white, thin border, photo fills the frame so the
-      // watermark sits across the bottom of the actual image
-      '.imgbox{position:relative;min-height:0;min-width:0;overflow:hidden;border:0.75pt solid #9aa3ad;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
-      // cover = fill the frame (minor crop ok); full-width photos get a 2-row-tall
-      // frame so the crop needed to fill is small and the photo reads large.
-      '.imgbox img{width:100%;height:100%;object-fit:cover;display:block}' +
+      '.prow-caps{flex:0 0 auto;display:flex;gap:0.16in;padding-top:3px;justify-content:center}' +
+      '.prow-caps .cap{flex:1 1 0;min-width:0;max-width:calc(50% - 0.08in)}' +
+      '.prow.full .prow-caps .cap{max-width:100%}' +
+      // engineering look: white, thin 4:3 frame; the whole photo is shown (no crop)
+      // so the watermark sits across the bottom of the actual image.
+      '.imgbox{position:relative;overflow:hidden;border:0.75pt solid #9aa3ad;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
+      '.imgbox img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}' +
       // solid info bar across the bottom of the image
       '.wm{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,0.68);color:#fff;font:600 8px "IBM Plex Mono",monospace;letter-spacing:.2px;padding:4px 8px 5px;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
       '.wm div{line-height:1.45;white-space:pre}' +
