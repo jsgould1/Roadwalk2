@@ -603,7 +603,7 @@
   function chunkArr(arr, size) { var out = []; for (var i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size)); return out; }
   // A full-width photo spans TWO row units (taller, shown uncropped); a half
   // pair / lone half spans one. Pack rows into pages of up to CAP row units.
-  function rowWeight(row) { return row.full ? 2 : 1; }
+  function rowWeight(row) { return row.full ? 3 : 2; }  // full = 1/2 page (2/pg), half-row = 1/3 page (3/pg = 6 photos)
   function paginateRows(rows, cap) {
     var pages = [], cur = [], w = 0;
     rows.forEach(function (row) {
@@ -660,9 +660,10 @@
         var pagesHtml = '';
         secs.forEach(function (s) {
           var usable = s.photos.filter(function (p) { return img[p.id]; });
-          // pack into span-aware rows; 4 units/page so TWO full photos share one
-          // page (each at half-page height), or up to 4 half-rows stack.
-          var pages = paginateRows(packRows(usable), 4);
+          // pack into span-aware rows; 6 units/page = 2 full photos (1/2 page
+          // each) OR 3 half-rows (6 photos). Rows are fixed height and do NOT
+          // stretch, so fewer photos just leave blank space at the bottom.
+          var pages = paginateRows(packRows(usable), 6);
           var routeId = (s.key === UNASSIGNED) ? 'Unassigned' : (s.key.indexOf('lot:') === 0 ? s.key.slice(4) : s.key);
           var code2 = parkCodeOf(s.key);
           var park = (singlePark && fieldVal) ? fieldVal : (parkFullName(code2) || fieldVal || _parkName || code2 || 'Field Photos');
@@ -811,9 +812,12 @@
       '.phdr .sc .sc-id{font-weight:700;font-size:14px;color:#5b6673;letter-spacing:.4px}' +
       '.phdr .sc .sc-nm{font-weight:700;font-size:14px;color:#5b6673;white-space:normal}' +
       // stack of equal-height rows; each row = an image band + optional caption band
-      '.grid{flex:1 1 auto;display:flex;flex-direction:column;gap:0.16in;min-height:0}' +
-      '.prow{flex:1 1 0;display:flex;flex-direction:column;min-height:0}' +
-      '.prow.full{flex:2 1 0}' +   // full-width photo = two row units tall
+      '.grid{flex:1 1 auto;display:flex;flex-direction:column;gap:0.16in;min-height:0;justify-content:flex-start}' +
+      // FIXED row heights (never stretched): a half-row is 1/3 of the page (so up
+      // to 3 rows = 6 photos), a full photo is 1/2 of the page (2 per page). Fewer
+      // photos leave blank space at the bottom rather than stretching.
+      '.prow{flex:0 0 calc(33.333% - 0.11in);display:flex;flex-direction:column;min-height:0}' +
+      '.prow.full{flex:0 0 calc(50% - 0.08in)}' +
       // Photos keep a true 4:3 frame and are NEVER trimmed: each image is the
       // largest 4:3 that fits its row band, centered, with blank space left over
       // where needed. Full = height-driven (fills the band height); half / lone =
