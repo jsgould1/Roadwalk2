@@ -823,10 +823,14 @@
       // where needed. Full = height-driven (fills the band height); half / lone =
       // capped to half the content width.
       '.prow-imgs{flex:1 1 auto;display:flex;gap:0.16in;min-height:0;justify-content:center;align-items:center}' +
-      '.prow-imgs .imgbox{max-width:100%;max-height:100%}' +
-      '.prow.full .prow-imgs .imgbox{aspect-ratio:4/3;height:100%;width:auto}' +  // full: fill the band height, width from 4:3
-      '.prow:not(.full) .prow-imgs .imgbox{width:calc(50% - 0.08in)}' +           // half/lone: half content width
-      '.prow:not(.full) .prow-imgs .imgbox::before{content:"";display:block;padding-top:75%}' +  // ...height from 4:3 (reliable in flex)
+      // All photos are height-driven: the image fills whatever height the row
+      // leaves AFTER the caption, 4:3, width from the ratio. Full spans up to the
+      // page width; half/lone cap at half width. This way a multi-line caption
+      // takes its space first and is never clipped; the photo just gets a bit
+      // shorter.
+      '.prow-imgs .imgbox{aspect-ratio:4/3;height:100%;width:auto;min-height:0;max-height:100%}' +
+      '.prow.full .prow-imgs .imgbox{max-width:100%}' +
+      '.prow:not(.full) .prow-imgs .imgbox{max-width:calc(50% - 0.08in)}' +
       '.prow.lone .prow-imgs{justify-content:flex-start}' +
       '.prow-caps{flex:0 0 auto;display:flex;gap:0.16in;padding-top:3px;justify-content:center}' +
       '.prow-caps .cap{flex:1 1 0;min-width:0;max-width:calc(50% - 0.08in)}' +
