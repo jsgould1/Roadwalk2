@@ -41,7 +41,24 @@
     const bundle = (data && data.bundle) || (data && Array.isArray(data.sections) ? data : null);
     if (bundle && Array.isArray(bundle.sections)) {
       if (sections().length && !confirm('Open “' + file.name + '”?\nThis replaces the current project.')) return;
-      if (RW().loadBundle) { await RW().loadBundle(bundle, { freshImport: true }); toast('Project opened · ' + bundle.sections.length + ' routes'); }
+      if (RW().loadBundle) await RW().loadBundle(bundle, { freshImport: true });
+      // A full export also carries the FIELD PHOTOS (descriptions, hearts, route
+      // tags, groups, links) in a separate DB. This open path used to drop them,
+      // so a colleague opening the file lost every caption + heart and had to
+      // start over. Restore them here. Image bytes may be absent (metadata-only
+      // save for SharePoint-shared folders) — re-importing the shared photo
+      // folder re-links the images by filename while KEEPING this metadata.
+      let geoMsg = '';
+      if (Array.isArray(data.geophotos) && data.geophotos.length
+          && window._RW && window._RW.geophotos && window._RW.geophotos.importBulk) {
+        try {
+          const n = await window._RW.geophotos.importBulk(data.geophotos);
+          const withImg = data.geophotos.filter((g) => g && g.dataUrl).length;
+          geoMsg = ' · ' + n + ' field photo' + (n === 1 ? '' : 's') +
+                   (withImg < n ? ' (re-import the photo folder to show the images)' : '');
+        } catch (ge) { console.warn('[RoadWalk] geophoto restore failed on open', ge); }
+      }
+      toast('Project opened · ' + bundle.sections.length + ' route' + (bundle.sections.length === 1 ? '' : 's') + geoMsg);
       render(); return;
     }
     toast('Unrecognized file — expected a GeoJSON or a project export', true);
