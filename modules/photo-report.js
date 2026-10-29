@@ -759,20 +759,18 @@
       var wmHtml = metaHtml ? '<div class="wm">' + metaHtml + '</div>' : '';
       return '<div class="imgbox"><img src="' + o.img[p.id] + '">' + wmHtml + '</div>';
     }
-    // Each row owns an image band (both photos share one height, so a caption on
-    // one photo shrinks BOTH equally) and, only when any photo in the row has a
-    // description, a caption band below with one centered cell per photo. Rows
-    // are pre-packed by span: full (1 photo spanning), half-pair (2), or a lone
-    // half (1 photo kept at half width).
+    // One CELL per photo: the image on top with its caption centered directly
+    // beneath. Cells have a fixed width (set in CSS per kind) so every photo of
+    // the same kind prints the SAME size, centered. Rows are pre-packed by span:
+    // full (1 photo), half-pair (2), or a lone half (1).
     var cells = (o.rows || []).map(function (row) {
-      var imgs = row.photos.map(imgboxHtml).join('');
-      var anyCap = row.photos.some(function (p) { return (p.description || '').trim(); });
-      var caps = anyCap ? '<div class="prow-caps">' + row.photos.map(function (p) {
-        var cap = (p.description || '').trim();
-        return '<div class="cap">' + (cap ? esc(cap) : '') + '</div>';
-      }).join('') + '</div>' : '';
       var cls = 'prow' + (row.full ? ' full' : '') + (row.lone ? ' lone' : '');
-      return '<div class="' + cls + '"><div class="prow-imgs">' + imgs + '</div>' + caps + '</div>';
+      var pcells = row.photos.map(function (p) {
+        var cap = (p.description || '').trim();
+        return '<div class="pcell">' + imgboxHtml(p) +
+          '<div class="cap">' + (cap ? esc(cap) : '') + '</div></div>';
+      }).join('');
+      return '<div class="' + cls + '"><div class="prow-imgs">' + pcells + '</div></div>';
     }).join('');
     var npsHtml = o.npsLogo ? '<img class="nps-logo" src="' + o.npsLogo + '" alt="NPS">' : '';
     var aecomHtml = o.aecomLogo ? '<img class="ftr-logo' + (o.aecomBlack ? ' blk' : '') + '" src="' + o.aecomLogo + '" alt="AECOM">' : '<span class="ftr-aecom">AECOM</span>';
@@ -802,7 +800,7 @@
       'html,body{margin:0;padding:0;font-family:"IBM Plex Sans",system-ui,sans-serif;color:#1A1D22}' +
       // Fixed page box, clipped so nothing can spill onto (and overlap) the next
       // printed page; small height buffer keeps a section to exactly one sheet.
-      '.page{height:9.9in;padding-bottom:0.16in;display:flex;flex-direction:column;overflow:hidden;page-break-after:always;break-after:page;break-inside:avoid;page-break-inside:avoid}' +
+      '.page{height:10.05in;padding-bottom:0.04in;display:flex;flex-direction:column;overflow:hidden;page-break-after:always;break-after:page;break-inside:avoid;page-break-inside:avoid}' +
       '.page:last-child{page-break-after:auto;break-after:auto}' +
       // header: NPS logo + full park name (navy) at top-left, section at right
       '.phdr{display:flex;align-items:center;gap:10px;border-bottom:2px solid #16315E;padding-bottom:6px;margin-bottom:9px;flex:0 0 auto}' +
@@ -811,34 +809,25 @@
       '.phdr .sc{flex:1 1 auto;text-align:right;align-self:flex-end;display:flex;flex-direction:column;align-items:flex-end;line-height:1.15}' +
       '.phdr .sc .sc-id{font-weight:700;font-size:14px;color:#5b6673;letter-spacing:.4px}' +
       '.phdr .sc .sc-nm{font-weight:700;font-size:14px;color:#5b6673;white-space:normal}' +
-      // stack of equal-height rows; each row = an image band + optional caption band
+      // Rows stack from the TOP at their natural height (image + caption); fewer
+      // photos just leave blank space at the bottom. The packer caps each page at
+      // 3 half-rows (6 photos) or 2 full photos.
       '.grid{flex:1 1 auto;display:flex;flex-direction:column;gap:0.16in;min-height:0;justify-content:flex-start}' +
-      // FIXED row heights (never stretched): a half-row is 1/3 of the page (so up
-      // to 3 rows = 6 photos), a full photo is 1/2 of the page (2 per page). Fewer
-      // photos leave blank space at the bottom rather than stretching.
-      '.prow{flex:0 0 calc(33.333% - 0.11in);display:flex;flex-direction:column;min-height:0}' +
-      '.prow.full{flex:0 0 calc(50% - 0.08in)}' +
-      // Photos keep a true 4:3 frame and are NEVER trimmed: each image is the
-      // largest 4:3 that fits its row band, centered, with blank space left over
-      // where needed. Full = height-driven (fills the band height); half / lone =
-      // capped to half the content width.
-      '.prow-imgs{flex:1 1 auto;display:flex;gap:0.16in;min-height:0;justify-content:center;align-items:center}' +
-      // All photos are height-driven: the image fills whatever height the row
-      // leaves AFTER the caption, 4:3, width from the ratio. Full spans up to the
-      // page width; half/lone cap at half width. This way a multi-line caption
-      // takes its space first and is never clipped; the photo just gets a bit
-      // shorter.
-      '.prow-imgs .imgbox{aspect-ratio:4/3;height:100%;width:auto;min-height:0;max-height:100%}' +
-      '.prow.full .prow-imgs .imgbox{max-width:100%}' +
-      '.prow:not(.full) .prow-imgs .imgbox{max-width:calc(50% - 0.08in)}' +
+      '.prow{flex:0 0 auto;display:flex;flex-direction:column}' +
+      '.prow-imgs{display:flex;gap:0.16in;justify-content:center;align-items:flex-start}' +
       '.prow.lone .prow-imgs{justify-content:flex-start}' +
-      '.prow-caps{flex:0 0 auto;display:flex;gap:0.16in;padding-top:3px;justify-content:center}' +
-      '.prow-caps .cap{flex:1 1 0;min-width:0;max-width:calc(50% - 0.08in)}' +
-      '.prow.full .prow-caps .cap{max-width:100%}' +
-      // engineering look: white, thin 4:3 frame; the whole photo is shown (no crop)
-      // so the watermark sits across the bottom of the actual image.
-      '.imgbox{position:relative;overflow:hidden;border:0.75pt solid #9aa3ad;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
+      // One cell per photo = image on top, caption centered beneath. FIXED cell
+      // width so every photo of the same kind prints the SAME size, centered:
+      // half photos ~42% of the content width (two across), full ~70%.
+      '.pcell{display:flex;flex-direction:column;align-items:center}' +
+      '.prow:not(.full) .pcell{width:42%}' +
+      '.prow.full .pcell{width:70%}' +
+      // 4:3 frame via a padding box (reliable in any layout); photo shown whole
+      // (no crop) so the watermark sits across the bottom of the actual image.
+      '.imgbox{position:relative;width:100%;overflow:hidden;border:0.75pt solid #9aa3ad;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
+      '.imgbox::before{content:"";display:block;padding-top:75%}' +
       '.imgbox img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}' +
+      '.cap{width:100%;margin-top:3px}' +
       // solid info bar across the bottom of the image
       '.wm{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,0.68);color:#fff;font:600 8px "IBM Plex Mono",monospace;letter-spacing:.2px;padding:4px 8px 5px;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
       '.wm div{line-height:1.45;white-space:pre}' +
@@ -846,7 +835,7 @@
       // typed description — centered under its image (never over the data)
       '.cap{text-align:center;font:600 9px "IBM Plex Sans",system-ui;color:#1A1D22;line-height:1.3;padding:0 6px;white-space:normal;overflow-wrap:anywhere}' +
       // footer: AECOM logo (bottom-left) + Route ID over Page N of X (bottom-right)
-      '.pftr{flex:0 0 auto;display:flex;justify-content:space-between;align-items:flex-end;border-top:1pt solid #c7ccd2;margin-top:0.14in;padding-top:6px}' +
+      '.pftr{flex:0 0 auto;display:flex;justify-content:space-between;align-items:flex-end;border-top:1pt solid #c7ccd2;margin-top:0.06in;padding-top:4px}' +
       '.pftr .ftr-logo{height:16px;width:auto;object-fit:contain}' +
       '.pftr .ftr-logo:not(.blk){filter:brightness(0)}' +
       '.pftr .ftr-aecom{font:800 12px "IBM Plex Sans",system-ui;color:#16315E;letter-spacing:1px}' +
