@@ -795,12 +795,14 @@
     var w = window.open('', '_blank');
     if (!w) { status('Pop-up blocked — allow pop-ups to print the report.'); return; }
     var css =
-      '@page{size:letter portrait;margin:0.45in}' +
+      // Narrower bottom margin drops the footer to ~0.22in from the sheet edge
+      // and gives the photos more height.
+      '@page{size:letter portrait;margin:0.45in 0.45in 0.22in}' +
       '*{box-sizing:border-box}' +
       'html,body{margin:0;padding:0;font-family:"IBM Plex Sans",system-ui,sans-serif;color:#1A1D22}' +
       // Fixed page box, clipped so nothing can spill onto (and overlap) the next
       // printed page; small height buffer keeps a section to exactly one sheet.
-      '.page{height:10.05in;padding-bottom:0.04in;display:flex;flex-direction:column;overflow:hidden;page-break-after:always;break-after:page;break-inside:avoid;page-break-inside:avoid}' +
+      '.page{height:10.33in;padding-bottom:0.02in;display:flex;flex-direction:column;overflow:hidden;page-break-after:always;break-after:page;break-inside:avoid;page-break-inside:avoid}' +
       '.page:last-child{page-break-after:auto;break-after:auto}' +
       // header: NPS logo + full park name (navy) at top-left, section at right
       '.phdr{display:flex;align-items:center;gap:10px;border-bottom:2px solid #16315E;padding-bottom:6px;margin-bottom:9px;flex:0 0 auto}' +
@@ -812,16 +814,17 @@
       // Rows stack from the TOP at their natural height (image + caption); fewer
       // photos just leave blank space at the bottom. The packer caps each page at
       // 3 half-rows (6 photos) or 2 full photos.
-      '.grid{flex:1 1 auto;display:flex;flex-direction:column;gap:0.16in;min-height:0;justify-content:flex-start}' +
+      '.grid{flex:1 1 auto;display:flex;flex-direction:column;gap:0.12in;min-height:0;justify-content:flex-start}' +
       '.prow{flex:0 0 auto;display:flex;flex-direction:column}' +
-      '.prow-imgs{display:flex;gap:0.16in;justify-content:center;align-items:flex-start}' +
+      '.prow-imgs{display:flex;gap:8pt;justify-content:center;align-items:flex-start}' +
       '.prow.lone .prow-imgs{justify-content:flex-start}' +
       // One cell per photo = image on top, caption centered beneath. FIXED cell
-      // width so every photo of the same kind prints the SAME size, centered:
-      // half photos ~42% of the content width (two across), full ~70%.
+      // width so every photo of the same kind prints the SAME size, centered.
+      // Half cells are sized so three rows + their captions (up to ~3 lines)
+      // still clear the footer; full photos span most of the page width.
       '.pcell{display:flex;flex-direction:column;align-items:center}' +
-      '.prow:not(.full) .pcell{width:42%}' +
-      '.prow.full .pcell{width:70%}' +
+      '.prow:not(.full) .pcell{width:46%}' +
+      '.prow.full .pcell{width:72%}' +
       // 4:3 frame via a padding box (reliable in any layout); photo shown whole
       // (no crop) so the watermark sits across the bottom of the actual image.
       '.imgbox{position:relative;width:100%;overflow:hidden;border:0.75pt solid #9aa3ad;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
@@ -833,7 +836,7 @@
       '.wm div{line-height:1.45;white-space:pre}' +
       '.wm .wm0{font-weight:800;font-size:9.5px;letter-spacing:.4px}' +
       // typed description — centered under its image (never over the data)
-      '.cap{text-align:center;font:600 9px "IBM Plex Sans",system-ui;color:#1A1D22;line-height:1.3;padding:0 6px;white-space:normal;overflow-wrap:anywhere}' +
+      '.cap{text-align:center;font:600 10.7px "IBM Plex Sans",system-ui;color:#1A1D22;line-height:1.28;padding:0 6px;white-space:normal;overflow-wrap:anywhere}' +
       // footer: AECOM logo (bottom-left) + Route ID over Page N of X (bottom-right)
       '.pftr{flex:0 0 auto;display:flex;justify-content:space-between;align-items:flex-end;border-top:1pt solid #c7ccd2;margin-top:0.06in;padding-top:4px}' +
       '.pftr .ftr-logo{height:16px;width:auto;object-fit:contain}' +
