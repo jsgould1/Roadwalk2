@@ -226,15 +226,26 @@
   }
   // hearted = TRUE/FALSE flag; original_description preserves the current text so
   // a new/expanded caption can be built in the editable `description` column.
-  var CSV_HEADER = ['photo_id', 'filename', 'set', 'park', 'route', 'sta', 'mp', 'lat', 'lng', 'file_path', 'hearted', 'original_description', 'description'];
+  // route           = PRIMARY tag the app chose (road preferred, else lot:<ident>)
+  // route_alt        = the OTHER candidate for an ambiguous photo (the lot when a
+  //                    road is primary, else the 2nd-nearest road) — reference only
+  // route_ambig      = TRUE when 2+ roads are in range OR both a road and a lot are
+  //                    tagged (i.e. the photo could be road or lot — needs a look)
+  // route_override   = EDITABLE: put the correct ident here ('CAHA-0215' or
+  //                    'lot:CAHA-0961JZ') to re-file the photo on import; blank = keep
+  var CSV_HEADER = ['photo_id', 'filename', 'set', 'park', 'route', 'route_alt', 'route_ambig', 'route_override', 'sta', 'mp', 'lat', 'lng', 'file_path', 'hearted', 'original_description', 'description'];
   function csvRowFor(p, base) {
     var route = p.rip_route || (p.rip_lot ? 'lot:' + p.rip_lot : '');
+    var routeAlt = '';
+    if (p.rip_route && p.rip_lot) routeAlt = 'lot:' + p.rip_lot;              // road primary, lot also in range
+    if (!routeAlt && p.rip_routes && p.rip_routes.length > 1) routeAlt = p.rip_routes[1].ident; // 2nd-nearest road
+    var ambig = (p.rip_route_ambig === true) || (!!p.rip_route && !!p.rip_lot);
     var code = (p.rip_park || parkCodeOf(route) || '').toUpperCase();
     var rel = photoRelPath(p);
     var full = base ? (base + '\\' + rel.replace(/\//g, '\\')) : rel;
     var desc = p.description || '';
     return [
-      p.id, p._name || '', p._set || '', code, route,
+      p.id, p._name || '', p._set || '', code, route, routeAlt, (ambig ? 'TRUE' : 'FALSE'), '',
       (p.rip_route_sta != null ? fmtSta(p.rip_route_sta) : ''),
       (p.rip_route_mp != null ? p.rip_route_mp : ''),
       (isFinite(Number(p.lat)) ? Number(p.lat).toFixed(6) : ''),
@@ -304,37 +315,69 @@
     var rows = parseCsv(text);
     if (!rows.length) { status('CSV is empty.'); return; }
     var head = rows[0].map(function (h) { return String(h || '').trim().toLowerCase(); });
-    var iId = head.indexOf('photo_id'), iName = head.indexOf('filename'), iSet = head.indexOf('set'), iRoute = head.indexOf('route'), iDesc = head.indexOf('description');
-    if (iDesc < 0) { status('CSV needs a "description" column.'); return; }
+    var iId = head.indexOf('photo_id'), iName = head.indexOf('filename'), iSet = head.indexOf('set'),
+        iRoute = head.indexOf('route'), iDesc = head.indexOf('description'),
+        iHeart = head.indexOf('hearted'), iOver = head.indexOf('route_override');
+    if (iDesc < 0 && iHeart < 0 && iOver < 0) { status('CSV needs a "description", "hearted", or "route_override" column.'); return; }
     var g = geo(); if (!g) { status('Field photos module not available.'); return; }
+    var tag = window.RW2PhotoTag || null;
     var all = g.list(), byId = {}; all.forEach(function (p) { byId[p.id] = p; });
-    var autoSaves = [], autoApplied = 0, conflicts = [], unmatched = 0, unchanged = 0;
+    var toSave = [], saveSet = {}, conflicts = [], overrides = [];
+    var autoApplied = 0, heartChanged = 0, overQueued = 0, unmatched = 0, unchanged = 0;
+    function markSave(p) { if (!saveSet[p.id]) { saveSet[p.id] = 1; toSave.push(p); } }
+    function truthy(v) { v = String(v == null ? '' : v).trim().toUpperCase(); return v === 'TRUE' || v === '1' || v === 'YES' || v === 'Y'; }
     for (var r = 1; r < rows.length; r++) {
       var row = rows[r]; if (!row || !row.length) continue;
-      var desc = ((iDesc < row.length ? row[iDesc] : '') || '').trim();
-      if (!desc) continue;                       // blank cell = leave existing alone
       var p = null;
-      if (iId >= 0 && row[iId]) p = byId[row[iId].trim()];
+      if (iId >= 0 && row[iId]) p = byId[String(row[iId]).trim()];
       if (!p && iName >= 0 && row[iName]) {       // fallback: filename (+ set)
-        var fn = row[iName].trim(), st = (iSet >= 0 && row[iSet]) ? row[iSet].trim() : null;
+        var fn = String(row[iName]).trim(), st = (iSet >= 0 && row[iSet]) ? String(row[iSet]).trim() : null;
         p = all.filter(function (x) { return x._name === fn && (st == null || (x._set || '') === st); })[0]
           || all.filter(function (x) { return x._name === fn; })[0];
       }
       if (!p) { unmatched++; continue; }
-      var old = (p.description || '').trim();
-      if (old === desc) { unchanged++; continue; }
-      if (!old) { p.description = desc; autoSaves.push(p); autoApplied++; }   // blank -> fill, no prompt
-      else { conflicts.push({ id: p.id, name: p._name || '', route: (iRoute >= 0 && row[iRoute]) ? row[iRoute] : (p.rip_route || p.rip_lot || ''), old: old, neu: desc }); }
-    }
-    Promise.all(autoSaves.map(function (p) { try { return geo().save(p); } catch (e) { return null; } })).then(function () {
-      if (conflicts.length) {
-        openCsvReview(conflicts, { autoApplied: autoApplied, unmatched: unmatched, unchanged: unchanged }, onDone);
-      } else {
-        renderBuilder();
-        status('Applied ' + autoApplied + ' description(s)' + (unchanged ? ' · ' + unchanged + ' unchanged' : '') + (unmatched ? ' · ' + unmatched + ' unmatched' : '') + '.');
-        onDone();
+      // hearted flag — explicit TRUE/FALSE only; a blank cell leaves it alone
+      if (iHeart >= 0 && String(row[iHeart] == null ? '' : row[iHeart]).trim() !== '') {
+        var want = truthy(row[iHeart]);
+        if (!!p.hearted !== want) { p.hearted = want; markSave(p); heartChanged++; }
       }
-    });
+      // route_override — re-file road↔lot via the manual-assign path; blank leaves it
+      if (iOver >= 0 && row[iOver] && String(row[iOver]).trim()) {
+        var ov = String(row[iOver]).trim(), kind = 'route', ident = ov;
+        if (/^lot:/i.test(ov)) { kind = 'lot'; ident = ov.replace(/^lot:/i, ''); }
+        var cur = (p.rip_lot && p.rip_lot_inside) ? ('lot:' + p.rip_lot) : (p.rip_route || (p.rip_lot ? 'lot:' + p.rip_lot : ''));
+        if (String(cur).toLowerCase() !== ov.toLowerCase()) { overrides.push({ id: p.id, ident: ident, kind: kind }); overQueued++; }
+      }
+      // description (existing behavior: blank = leave, same = unchanged, new = auto-fill, different = review)
+      if (iDesc >= 0) {
+        var desc = ((iDesc < row.length ? row[iDesc] : '') || '').trim();
+        if (desc) {
+          var old = (p.description || '').trim();
+          if (old === desc) { unchanged++; }
+          else if (!old) { p.description = desc; markSave(p); autoApplied++; }
+          else { conflicts.push({ id: p.id, name: p._name || '', route: (iRoute >= 0 && row[iRoute]) ? row[iRoute] : (p.rip_route || p.rip_lot || ''), old: old, neu: desc }); }
+        }
+      }
+    }
+    function applyOverrides() {
+      if (!overrides.length || !tag || !tag.assignTarget) return Promise.resolve();
+      return overrides.reduce(function (chain, o) {
+        return chain.then(function () { try { return tag.assignTarget(o.id, o.ident, o.kind); } catch (e) { return null; } });
+      }, Promise.resolve());
+    }
+    Promise.all(toSave.map(function (p) { try { return geo().save(p); } catch (e) { return null; } }))
+      .then(applyOverrides)
+      .then(function () {
+        var extra = (heartChanged ? ' · ' + heartChanged + ' heart' + (heartChanged === 1 ? '' : 's') : '') +
+                    (overQueued ? ' · ' + overQueued + ' re-filed' : '');
+        if (conflicts.length) {
+          openCsvReview(conflicts, { autoApplied: autoApplied, unmatched: unmatched, unchanged: unchanged }, onDone);
+        } else {
+          renderBuilder();
+          status('Applied ' + autoApplied + ' description(s)' + extra + (unchanged ? ' · ' + unchanged + ' unchanged' : '') + (unmatched ? ' · ' + unmatched + ' unmatched' : '') + '.');
+          onDone();
+        }
+      });
   }
 
   // Review panel: only for CONFLICTS (photo already has a different description).
