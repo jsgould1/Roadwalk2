@@ -233,7 +233,9 @@
   //                    tagged (i.e. the photo could be road or lot — needs a look)
   // route_override   = EDITABLE: put the correct ident here ('CAHA-0215' or
   //                    'lot:CAHA-0961JZ') to re-file the photo on import; blank = keep
-  var CSV_HEADER = ['photo_id', 'filename', 'set', 'park', 'route', 'route_alt', 'route_ambig', 'route_override', 'sta', 'mp', 'lat', 'lng', 'file_path', 'hearted', 'original_description', 'description'];
+  // rpt_order        = EDITABLE: within-section print order (0,1,2,…; lower prints
+  //                    first — same field the report's drag-to-reorder writes); blank = keep
+  var CSV_HEADER = ['photo_id', 'filename', 'set', 'park', 'route', 'route_alt', 'route_ambig', 'route_override', 'rpt_order', 'sta', 'mp', 'lat', 'lng', 'file_path', 'hearted', 'original_description', 'description'];
   function csvRowFor(p, base) {
     var route = p.rip_route || (p.rip_lot ? 'lot:' + p.rip_lot : '');
     var routeAlt = '';
@@ -246,6 +248,7 @@
     var desc = p.description || '';
     return [
       p.id, p._name || '', p._set || '', code, route, routeAlt, (ambig ? 'TRUE' : 'FALSE'), '',
+      (p.rip_rpt_order == null ? '' : p.rip_rpt_order),
       (p.rip_route_sta != null ? fmtSta(p.rip_route_sta) : ''),
       (p.rip_route_mp != null ? p.rip_route_mp : ''),
       (isFinite(Number(p.lat)) ? Number(p.lat).toFixed(6) : ''),
@@ -317,13 +320,13 @@
     var head = rows[0].map(function (h) { return String(h || '').trim().toLowerCase(); });
     var iId = head.indexOf('photo_id'), iName = head.indexOf('filename'), iSet = head.indexOf('set'),
         iRoute = head.indexOf('route'), iDesc = head.indexOf('description'),
-        iHeart = head.indexOf('hearted'), iOver = head.indexOf('route_override');
-    if (iDesc < 0 && iHeart < 0 && iOver < 0) { status('CSV needs a "description", "hearted", or "route_override" column.'); return; }
+        iHeart = head.indexOf('hearted'), iOver = head.indexOf('route_override'), iOrd = head.indexOf('rpt_order');
+    if (iDesc < 0 && iHeart < 0 && iOver < 0 && iOrd < 0) { status('CSV needs a "description", "hearted", "route_override", or "rpt_order" column.'); return; }
     var g = geo(); if (!g) { status('Field photos module not available.'); return; }
     var tag = window.RW2PhotoTag || null;
     var all = g.list(), byId = {}; all.forEach(function (p) { byId[p.id] = p; });
     var toSave = [], saveSet = {}, conflicts = [], overrides = [];
-    var autoApplied = 0, heartChanged = 0, overQueued = 0, unmatched = 0, unchanged = 0;
+    var autoApplied = 0, heartChanged = 0, overQueued = 0, orderChanged = 0, unmatched = 0, unchanged = 0;
     function markSave(p) { if (!saveSet[p.id]) { saveSet[p.id] = 1; toSave.push(p); } }
     function truthy(v) { v = String(v == null ? '' : v).trim().toUpperCase(); return v === 'TRUE' || v === '1' || v === 'YES' || v === 'Y'; }
     for (var r = 1; r < rows.length; r++) {
@@ -348,6 +351,11 @@
         var cur = (p.rip_lot && p.rip_lot_inside) ? ('lot:' + p.rip_lot) : (p.rip_route || (p.rip_lot ? 'lot:' + p.rip_lot : ''));
         if (String(cur).toLowerCase() !== ov.toLowerCase()) { overrides.push({ id: p.id, ident: ident, kind: kind }); overQueued++; }
       }
+      // rpt_order — within-section print order; blank leaves it
+      if (iOrd >= 0 && String(row[iOrd] == null ? '' : row[iOrd]).trim() !== '') {
+        var ordv = parseInt(String(row[iOrd]).trim(), 10);
+        if (!isNaN(ordv) && p.rip_rpt_order !== ordv) { p.rip_rpt_order = ordv; markSave(p); orderChanged++; }
+      }
       // description (existing behavior: blank = leave, same = unchanged, new = auto-fill, different = review)
       if (iDesc >= 0) {
         var desc = ((iDesc < row.length ? row[iDesc] : '') || '').trim();
@@ -369,7 +377,8 @@
       .then(applyOverrides)
       .then(function () {
         var extra = (heartChanged ? ' · ' + heartChanged + ' heart' + (heartChanged === 1 ? '' : 's') : '') +
-                    (overQueued ? ' · ' + overQueued + ' re-filed' : '');
+                    (overQueued ? ' · ' + overQueued + ' re-filed' : '') +
+                    (orderChanged ? ' · ' + orderChanged + ' ordered' : '');
         if (conflicts.length) {
           openCsvReview(conflicts, { autoApplied: autoApplied, unmatched: unmatched, unchanged: unchanged }, onDone);
         } else {
