@@ -73,7 +73,7 @@
 
   // Selection of which section keys get printed (hierarchical by park in the UI).
   // null = not initialised yet; defaults to the loaded park's sections on open.
-  var _sel = null, _selParkCtx = null;
+  var _sel = null, _selParkCtx = null, _areaPick = '__all__';
   function selectedSections(secs) {
     return secs.filter(function (s) { return !_sel || _sel[s.key]; });
   }
@@ -95,7 +95,21 @@
     });
     porder.sort(function (a, b) { if (a === '(untagged)') return 1; if (b === '(untagged)') return -1; return a < b ? -1 : 1; });
     if (!porder.length) { host.innerHTML = '<div class="prt-h">Routes to print</div><div class="prt-empty">No hearted photos yet.</div>'; return; }
-    var html = '<div class="prt-h">Routes to print' +
+    // Area/section filter (e.g. CAHA 2A/2B/2C/2D) — present only when the loaded
+    // park has a shipped area map. Picking an area checks just that area's routes.
+    var areaCounts = {};
+    secs.forEach(function (s) { var a = areaOf(parkCodeOf(s.key), s.key); if (a) areaCounts[a] = (areaCounts[a] || 0) + 1; });
+    var areaKeys = Object.keys(areaCounts).sort();
+    var areaHtml = '';
+    if (areaKeys.length) {
+      areaHtml = '<div class="prt-areaf" style="padding:7px 8px;border-bottom:1px solid var(--rule,#DDD7C8);display:flex;align-items:center;gap:6px;flex-wrap:wrap">' +
+        '<span style="font:700 10px \'IBM Plex Mono\',monospace;letter-spacing:.06em;color:var(--blue,#0B3D66)">FILTER TO AREA</span>' +
+        '<select id="pr-area" style="font:600 12px system-ui;padding:3px 6px;border:1px solid var(--rule,#DDD7C8);border-radius:6px;background:var(--paper,#FBFAF6);color:var(--ink,#1A1D22)">' +
+        '<option value="__all__">All areas</option>' +
+        areaKeys.map(function (a) { return '<option value="' + esc(a) + '">' + esc(a) + ' (' + areaCounts[a] + ')</option>'; }).join('') +
+        '</select></div>';
+    }
+    var html = areaHtml + '<div class="prt-h">Routes to print' +
       '<span class="prt-allnone" style="float:right;font-weight:400;font-size:11px">' +
       '<a href="#" data-all="1" style="color:#0B3D66;text-decoration:none">all</a> · ' +
       '<a href="#" data-all="0" style="color:#0B3D66;text-decoration:none">none</a></span></div>';
@@ -112,10 +126,23 @@
       html += '</div></div>';
     });
     host.innerHTML = html;
+    var asel = host.querySelector('#pr-area');
+    if (asel) {
+      try { asel.value = _areaPick; } catch (e) {}
+      if (asel.value !== _areaPick) { _areaPick = '__all__'; asel.value = '__all__'; }  // picked area no longer present
+      asel.addEventListener('change', function () {
+        _areaPick = asel.value;
+        secs.forEach(function (s) {
+          _sel[s.key] = (_areaPick === '__all__') ? true : (areaOf(parkCodeOf(s.key), s.key) === _areaPick);
+        });
+        prRefresh();
+      });
+    }
     Array.prototype.forEach.call(host.querySelectorAll('.prt-allnone a'), function (a) {
       a.addEventListener('click', function (e) {
         e.preventDefault();
         var on = a.getAttribute('data-all') === '1';
+        _areaPick = '__all__';
         secs.forEach(function (s) { _sel[s.key] = on; });
         prRefresh();
       });
@@ -804,6 +831,22 @@
   }
   window.RW2ParkNames = { load: loadParkNames, full: parkFullName };
 
+  // Route/lot -> field map-area (e.g. CAHA 2A/2B/2C/2D) lookup, shipped at the
+  // app root as area-map.json: { "<PARK>": { "<routekey>": "<area>" } } where
+  // routekey matches the report tree's s.key ("CAHA-0255" or "lot:CAHA-0912").
+  // Lets the report builder filter the print selection to one map area.
+  var _areaMap = null, _areaMapP = null;
+  function loadAreaMap() {
+    if (_areaMap) return Promise.resolve(_areaMap);
+    if (_areaMapP) return _areaMapP;
+    _areaMapP = fetch('area-map.json', { cache: 'force-cache' })
+      .then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (j) { _areaMap = j || {}; return _areaMap; })
+      .catch(function () { _areaMap = {}; return _areaMap; });
+    return _areaMapP;
+  }
+  function areaOf(code, key) { var m = _areaMap && _areaMap[code]; return (m && m[key]) || null; }
+
   // Load a logo file from the app root as a data URI (cached once per name).
   var _logoCache = {};
   function fetchLogoFile(name) {
@@ -1304,6 +1347,8 @@
       })();
     }
     ov.classList.add('on');
+    // Load the field area-map (if any) so the "Filter to area" control appears.
+    loadAreaMap().then(function () { try { renderTree(); } catch (e) {} });
     // Reflect the global export-watermark setting (save/copy/print share it).
     var pw = $('pr-wm'); if (pw) { try { pw.checked = localStorage.getItem('rw_export_watermark') !== '0'; } catch (e) {} }
     var pn = $('pr-pagenums'); if (pn) { try { pn.checked = localStorage.getItem('rw_report_pagenums') !== '0'; } catch (e) {} }
