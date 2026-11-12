@@ -963,8 +963,12 @@
       // 3 half-rows (6 photos) or 2 full photos.
       '.grid{flex:1 1 auto;display:flex;flex-direction:column;gap:0.12in;min-height:0;justify-content:flex-start}' +
       '.prow{flex:0 0 auto;display:flex;flex-direction:column}' +
-      '.prow-imgs{display:flex;gap:8pt;justify-content:center;align-items:flex-start}' +
-      '.prow.lone .prow-imgs{justify-content:flex-start}' +
+      // Half-photo rows are LEFT-aligned so the left column shares one edge
+      // whether a row has two photos or a lone odd one (an odd 5th photo used to
+      // sit flush-left under a centered pair → visibly misaligned). Full-width
+      // photos stay centered on the page.
+      '.prow-imgs{display:flex;gap:8pt;justify-content:flex-start;align-items:flex-start}' +
+      '.prow.full .prow-imgs{justify-content:center}' +
       // One cell per photo = image on top, caption centered beneath. FIXED cell
       // width so every photo of the same kind prints the SAME size, centered.
       // Half cells are sized so three rows + their captions (up to ~3 lines)
