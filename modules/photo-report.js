@@ -963,6 +963,7 @@
   }
   function _prHvHide() { _prHvTok++; if (_prHvEl) _prHvEl.style.display = 'none'; }
 
+  var _openSec = {};   // builder section key -> open/collapsed (lazy render so a big park opens instantly)
   function renderBuilder() {
     _prHvHide();
     var host = $('pr-body'); if (!host) return;
@@ -974,8 +975,16 @@
     updateSelCount();
     if (!secs.length) { host.innerHTML = '<div class="pr-empty">No photos' + (heartedOnly ? ' hearted/selected yet' : ' yet') + '.</div>'; return; }
 
+    // Big parks: render a section's cards only when it is OPEN, so the builder
+    // opens instantly instead of laying out hundreds of cards/textareas at once.
+    // Small sets auto-open (unchanged feel); past the cap, sections start collapsed.
+    var totalSel = secs.reduce(function (a, s) { return a + s.photos.length; }, 0);
+    var autoOpen = totalSel <= 90;
+    function secIsOpen(key) { return (_openSec[key] != null) ? _openSec[key] : autoOpen; }
+
     host.innerHTML = secs.map(function (s) {
-      var cards = s.photos.map(function (p, i) {
+      var open = secIsOpen(s.key);
+      var cards = !open ? '' : s.photos.map(function (p, i) {
         var isFull = spanOf(p) === 'full';
         return '<div class="pr-card" data-id="' + esc(p.id) + '">' +
           '<span class="pr-num" draggable="true" title="Print order #' + (i + 1) + ' — drag to reorder">' + (i + 1) + '</span>' +
@@ -987,11 +996,22 @@
           '<textarea class="pr-cap" rows="2" placeholder="Caption / description…">' + esc(p.description || '') + '</textarea>' +
           '</div>';
       }).join('');
-      return '<div class="pr-sec"><div class="pr-sec-h">' + esc(s.title) +
+      return '<div class="pr-sec' + (open ? '' : ' pr-collapsed') + '">' +
+        '<div class="pr-sec-h"><button class="pr-sec-tog" data-key="' + esc(s.key) + '" title="Show / hide this section">' + (open ? '▾' : '▸') + '</button> ' + esc(s.title) +
         ' <span class="pr-sec-n">' + s.photos.length + '</span>' +
-        '<span class="pr-sec-hint">drag # to reorder · Full/Half sets print size</span></div>' +
-        '<div class="pr-grid">' + cards + '</div></div>';
+        (open ? '<span class="pr-sec-hint">drag # to reorder · Full/Half sets print size</span>'
+              : '<span class="pr-sec-hint">collapsed — click ▸ to load its photos</span>') + '</div>' +
+        (open ? '<div class="pr-grid">' + cards + '</div>' : '') + '</div>';
     }).join('');
+
+    // section expand/collapse toggles (keep the builder instant for large parks)
+    Array.prototype.forEach.call(host.querySelectorAll('.pr-sec-tog'), function (tog) {
+      tog.addEventListener('click', function () {
+        var k = tog.getAttribute('data-key');
+        _openSec[k] = !secIsOpen(k);
+        renderBuilder();
+      });
+    });
 
     // wire cards + lazy-load thumbnails (works for offloaded sets too)
     Array.prototype.forEach.call(host.querySelectorAll('.pr-card'), function (card) {
@@ -1091,6 +1111,8 @@
       '.pr-empty{color:var(--mute,#9BA0A8);padding:30px;text-align:center}' +
       '.pr-sec{margin-bottom:16px}' +
       '.pr-sec-h{font:700 12.5px "IBM Plex Mono",monospace;color:var(--ink,#1A1D22);padding:6px 0;border-bottom:1px solid var(--rule,#DDD7C8);margin-bottom:8px}' +
+      '.pr-sec-tog{background:none;border:0;cursor:pointer;font-size:13px;color:var(--blue,#0B3D66);padding:0 5px 0 0}' +
+      '.pr-collapsed .pr-sec-h{opacity:.82;margin-bottom:0}' +
       '.pr-sec-n{color:var(--mute,#9BA0A8);font-weight:500}' +
       '.pr-sec-hint{float:right;font:500 10.5px system-ui;color:#9BA0A8;letter-spacing:0}' +
       '.pr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px}' +
