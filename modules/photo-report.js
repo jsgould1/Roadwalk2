@@ -729,6 +729,30 @@
     });
   }
 
+  // Build the print pages HTML for a set of sections, given resolved images.
+  function pagesHtmlFor(secs, img, blackLogo, npsLogo) {
+    var wmOn = !$('pr-wm') || $('pr-wm').checked;
+    var pageNums = !$('pr-pagenums') || $('pr-pagenums').checked;
+    var fieldVal = (($('pr-park') && $('pr-park').value) || '').trim();
+    var parkCodes = {}; secs.forEach(function (s) { parkCodes[parkCodeOf(s.key)] = 1; });
+    var singlePark = Object.keys(parkCodes).length === 1;
+    var aecomLogo = blackLogo || (document.querySelector('.aecom-logo') || {}).src || '';
+    var aecomBlack = !!blackLogo;
+    var pagesHtml = '';
+    secs.forEach(function (s) {
+      var usable = s.photos.filter(function (p) { return img[p.id]; });
+      var pages = paginateRows(packRows(usable), 6);
+      var routeId = (s.key === UNASSIGNED) ? 'Unassigned' : (s.key.indexOf('lot:') === 0 ? s.key.slice(4) : s.key);
+      var code2 = parkCodeOf(s.key);
+      var park = (singlePark && fieldVal) ? fieldVal : (parkFullName(code2) || fieldVal || _parkName || code2 || 'Field Photos');
+      pages.forEach(function (pageRows, pi) {
+        pagesHtml += pageHtml({ park: park, aecomLogo: aecomLogo, aecomBlack: aecomBlack, npsLogo: npsLogo,
+          secTitle: s.title, routeId: routeId, pageIdx: pi + 1, pageCount: pages.length, rows: pageRows, img: img, wmOn: wmOn, pageNums: pageNums });
+      });
+    });
+    return pagesHtml;
+  }
+
   // ---- PDF (print window) ----------------------------------------------------
   function generate() {
     var secs = selectedSections(grouped(true));
@@ -776,36 +800,72 @@
         var blackLogo = all[0], npsLogo = all[1], res = all[3];
         var img = {}; var missing = 0;
         res.forEach(function (r) { if (r.d) img[r.id] = r.d; else missing++; });
-        var wmOn = !$('pr-wm') || $('pr-wm').checked;
-        var pageNums = !$('pr-pagenums') || $('pr-pagenums').checked;
-        // Each page's header park is derived from that section's own route/lot
-        // prefix, so a multi-park print labels every page correctly. The manual
-        // Park field only overrides when a single park is being printed.
-        var fieldVal = (($('pr-park') && $('pr-park').value) || '').trim();
-        var parkCodes = {}; secs.forEach(function (s) { parkCodes[parkCodeOf(s.key)] = 1; });
-        var singlePark = Object.keys(parkCodes).length === 1;
-        // Prefer the official black AECOM logo; fall back to the app reverse logo, darkened.
-        var aecomLogo = blackLogo || (document.querySelector('.aecom-logo') || {}).src || '';
-        var aecomBlack = !!blackLogo;
-        var pagesHtml = '';
-        secs.forEach(function (s) {
-          var usable = s.photos.filter(function (p) { return img[p.id]; });
-          // pack into span-aware rows; 6 units/page = 2 full photos (1/2 page
-          // each) OR 3 half-rows (6 photos). Rows are fixed height and do NOT
-          // stretch, so fewer photos just leave blank space at the bottom.
-          var pages = paginateRows(packRows(usable), 6);
-          var routeId = (s.key === UNASSIGNED) ? 'Unassigned' : (s.key.indexOf('lot:') === 0 ? s.key.slice(4) : s.key);
-          var code2 = parkCodeOf(s.key);
-          var park = (singlePark && fieldVal) ? fieldVal : (parkFullName(code2) || fieldVal || _parkName || code2 || 'Field Photos');
-          pages.forEach(function (pageRows, pi) {
-            pagesHtml += pageHtml({ park: park, aecomLogo: aecomLogo, aecomBlack: aecomBlack, npsLogo: npsLogo,
-              secTitle: s.title, routeId: routeId, pageIdx: pi + 1, pageCount: pages.length, rows: pageRows, img: img, wmOn: wmOn, pageNums: pageNums });
-          });
-        });
+        var pagesHtml = pagesHtmlFor(secs, img, blackLogo, npsLogo);
         if (!pagesHtml) { try { printWin.close(); } catch (e) {} status('No printable images (all offloaded with no stored copy?).'); return; }
         openPrint(pagesHtml, printWin);
         status('Opened print view' + (missing ? ' · ' + missing + ' photo(s) had no image' : '') + '. Use "Save as PDF".');
       });
+  }
+
+  // Print one PDF per field map-area (e.g. CAHA 1A, 1B, 2A…), each named by the
+  // area so "Save as PDF" pre-fills <PARK>_<AREA>. Images are resolved once and
+  // the print dialog is driven area-by-area (window.print() blocks until each is
+  // dismissed), so the user saves 16 correctly-named files without re-selecting.
+  function generateByArea() {
+    var secs = selectedSections(grouped(true));
+    if (!secs.length) { status('Select routes to print (left panel).'); return; }
+    var printWin = null;
+    try { printWin = window.open('', '_blank'); } catch (e) {}
+    if (!printWin) { status('Pop-up blocked — allow pop-ups for this site, then click again.'); return; }
+    try { printWin.document.write('<!doctype html><meta charset="utf-8"><title>Area PDFs</title>' +
+      '<body style="margin:0;font:600 15px system-ui;color:#333;background:#fbfaf6;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;padding:24px"><div>Preparing area PDFs…</div></body>'); } catch (e) {}
+    // station backfill (same as generate)
+    if (window.RW2PhotoTag && window.RW2PhotoTag.station) {
+      secs.forEach(function (s) { s.photos.forEach(function (p) {
+        if (p.rip_route && (p.rip_route_mp == null || p.rip_route_sta == null) && isFinite(Number(p.lat)) && isFinite(Number(p.lng))) {
+          try { var st = window.RW2PhotoTag.station(Number(p.lat), Number(p.lng), p.rip_route); if (st) { p.rip_route_sta = st.sta; p.rip_route_mp = st.mp; } } catch (e) {}
+        }
+      }); });
+    }
+    var ids = []; secs.forEach(function (s) { s.photos.forEach(function (p) { ids.push(p.id); }); });
+    Promise.all([
+      fetchLogoFile('aecom-logo-black.png'), fetchLogoFile('nps-logo.png'), loadParkNames(), loadAreaMap(),
+      mapLimit(ids, 6, function (id) { return imageFor(id).then(downscaleForPrint).then(function (d) { return { id: id, d: d }; }); },
+        function (n, t) { status('Preparing images… ' + n + ' / ' + t); }),
+    ]).then(function (all) {
+      var blackLogo = all[0], npsLogo = all[1], img = {};
+      all[4].forEach(function (r) { if (r.d) img[r.id] = r.d; });
+      // group selected sections by area
+      var groups = {}, areas = [];
+      secs.forEach(function (s) {
+        var a = areaOf(parkCodeOf(s.key), s.key) || 'Unassigned';
+        if (!groups[a]) { groups[a] = []; areas.push(a); }
+        groups[a].push(s);
+      });
+      areas.sort();
+      if (!areas.length) { try { printWin.close(); } catch (e) {} status('No areas to print.'); return; }
+      var parkCode = parkCodeOf(secs[0].key) || 'FIELD';
+      var css = printCss();
+      var i = 0;
+      function next() {
+        if (i >= areas.length) { try { printWin.close(); } catch (e) {} status('Done — saved ' + areas.length + ' area PDF(s).'); return; }
+        var area = areas[i], title = parkCode + '_' + area;
+        var pagesHtml = pagesHtmlFor(groups[area], img, blackLogo, npsLogo);
+        status('Area ' + area + ' (' + (i + 1) + ' of ' + areas.length + ') — in the Save dialog, keep the name “' + title + '”.');
+        try {
+          printWin.document.open();
+          printWin.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + title + '</title><style>' + css + '</style></head><body>' + pagesHtml + '</body></html>');
+          printWin.document.close();
+          try { printWin.document.title = title; } catch (e) {}
+        } catch (e) {}
+        // let images paint, then print (blocks until the Save dialog is dismissed), then advance
+        setTimeout(function () {
+          try { printWin.focus(); printWin.print(); } catch (e) {}
+          i++; setTimeout(next, 400);
+        }, 700);
+      }
+      next();
+    });
   }
 
   // Survey station from along-route feet: 1234 ft → "12+34".
@@ -937,68 +997,49 @@
       '</div></section>';
   }
 
-  function openPrint(pagesHtml, w) {
-    // Prefer a window opened synchronously at click time (passed in) so the
-    // pop-up isn't blocked after the async image load; fall back to opening now.
-    if (!w) { w = window.open('', '_blank'); }
-    if (!w) { status('Pop-up blocked — allow pop-ups to print the report.'); return; }
-    var css =
-      // Narrower bottom margin drops the footer to ~0.22in from the sheet edge
-      // and gives the photos more height.
+  // Shared print stylesheet (used by the single print and the per-area export).
+  function printCss() {
+    return '' +
       '@page{size:letter portrait;margin:0.45in 0.45in 0.22in}' +
       '*{box-sizing:border-box}' +
       'html,body{margin:0;padding:0;font-family:"IBM Plex Sans",system-ui,sans-serif;color:#1A1D22}' +
-      // Fixed page box, clipped so nothing can spill onto (and overlap) the next
-      // printed page; small height buffer keeps a section to exactly one sheet.
       '.page{height:10.33in;padding-bottom:0.02in;display:flex;flex-direction:column;overflow:hidden;page-break-after:always;break-after:page;break-inside:avoid;page-break-inside:avoid}' +
       '.page:last-child{page-break-after:auto;break-after:auto}' +
-      // header: NPS logo + full park name (navy) at top-left, section at right
       '.phdr{display:flex;align-items:center;gap:10px;border-bottom:2px solid #16315E;padding-bottom:6px;margin-bottom:9px;flex:0 0 auto}' +
       '.phdr .nps-logo{height:48px;width:auto;object-fit:contain;flex:0 0 auto}' +
       '.phdr .pk{font-weight:800;font-size:17px;color:#16315E;letter-spacing:.2px;line-height:1.12;white-space:normal}' +
       '.phdr .sc{flex:1 1 auto;text-align:right;align-self:flex-end;display:flex;flex-direction:column;align-items:flex-end;line-height:1.15}' +
       '.phdr .sc .sc-id{font-weight:700;font-size:14px;color:#5b6673;letter-spacing:.4px}' +
       '.phdr .sc .sc-nm{font-weight:700;font-size:14px;color:#5b6673;white-space:normal}' +
-      // Rows stack from the TOP at their natural height (image + caption); fewer
-      // photos just leave blank space at the bottom. The packer caps each page at
-      // 3 half-rows (6 photos) or 2 full photos.
       '.grid{flex:1 1 auto;display:flex;flex-direction:column;gap:0.12in;min-height:0;justify-content:flex-start}' +
       '.prow{flex:0 0 auto;display:flex;flex-direction:column}' +
-      // Half-photo rows are LEFT-aligned so the left column shares one edge
-      // whether a row has two photos or a lone odd one (an odd 5th photo used to
-      // sit flush-left under a centered pair → visibly misaligned). Full-width
-      // photos stay centered on the page.
       '.prow-imgs{display:flex;gap:8pt;justify-content:flex-start;align-items:flex-start}' +
       '.prow.full .prow-imgs{justify-content:center}' +
-      // One cell per photo = image on top, caption centered beneath. FIXED cell
-      // width so every photo of the same kind prints the SAME size, centered.
-      // Half cells are sized so three rows + their captions (up to ~3 lines)
-      // still clear the footer; full photos span most of the page width.
       '.pcell{display:flex;flex-direction:column;align-items:center}' +
       '.prow:not(.full) .pcell{width:46%}' +
       '.prow.full .pcell{width:72%}' +
-      // 4:3 frame via a padding box (reliable in any layout); photo shown whole
-      // (no crop) so the watermark sits across the bottom of the actual image.
       '.imgbox{position:relative;width:100%;overflow:hidden;border:0.75pt solid #9aa3ad;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
       '.imgbox::before{content:"";display:block;padding-top:75%}' +
       '.imgbox img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}' +
       '.cap{width:100%;margin-top:3px}' +
-      // solid info bar across the bottom of the image
       '.wm{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,0.68);color:#fff;font:600 8px "IBM Plex Mono",monospace;letter-spacing:.2px;padding:4px 8px 5px;-webkit-print-color-adjust:exact;print-color-adjust:exact}' +
       '.wm div{line-height:1.45;white-space:pre}' +
       '.wm .wm0{font-weight:800;font-size:9.5px;letter-spacing:.4px}' +
-      // typed description — centered under its image (never over the data)
-      // Cap the caption at 3 printed lines so a long one can never run over the
-      // footer; captions should be AUTHORED to ~2 lines (see rubric). The full
-      // text still round-trips through the CSV — only the printed box is clamped.
       '.cap{text-align:center;font:600 10.7px "IBM Plex Sans",system-ui;color:#1A1D22;line-height:1.28;padding:0 6px;white-space:normal;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}' +
-      // footer: AECOM logo (bottom-left) + Route ID over Page N of X (bottom-right)
       '.pftr{flex:0 0 auto;display:flex;justify-content:space-between;align-items:flex-end;border-top:1pt solid #c7ccd2;margin-top:0.06in;padding-top:4px}' +
       '.pftr .ftr-logo{height:16px;width:auto;object-fit:contain}' +
       '.pftr .ftr-logo:not(.blk){filter:brightness(0)}' +
       '.pftr .ftr-aecom{font:800 12px "IBM Plex Sans",system-ui;color:#16315E;letter-spacing:1px}' +
       '.pftr-r{display:flex;flex-direction:column;align-items:flex-end;gap:1px;font:600 9px "IBM Plex Mono",monospace;color:#5b6673;letter-spacing:.3px}' +
       '.pftr-r .rid{font-weight:800;color:#16315E;font-size:10px}';
+  }
+
+  function openPrint(pagesHtml, w) {
+    // Prefer a window opened synchronously at click time (passed in) so the
+    // pop-up isn't blocked after the async image load; fall back to opening now.
+    if (!w) { w = window.open('', '_blank'); }
+    if (!w) { status('Pop-up blocked — allow pop-ups to print the report.'); return; }
+    var css = printCss();
     // A big report (hundreds of inlined images) is tens of MB of HTML, which
     // document.write handles poorly. Navigate the window to a Blob URL instead
     // and let the loaded page print itself once its images have painted.
@@ -1312,6 +1353,7 @@
             '<span class="sp"></span>' +
             '<span id="pr-status" style="font:500 11.5px system-ui;color:var(--mute,#9BA0A8)"></span>' +
             '<button class="pr-btn go" id="pr-go">Generate PDF</button>' +
+            '<button class="pr-btn" id="pr-go-area" title="Print one PDF per map area (1A, 1B, 2A…) for the selected routes — each Save-as-PDF is pre-named by area">⬇ PDF by area</button>' +
             '<button class="pr-btn" id="pr-close">Close</button>' +
           '</div>' +
           '<div id="pr-main"><div id="pr-tree"></div><div id="pr-split" title="Drag to resize"></div><div id="pr-body"></div></div>' +
@@ -1320,6 +1362,7 @@
       ov.addEventListener('click', function (e) { if (e.target === ov) closeOverlay(); });
       $('pr-close').addEventListener('click', closeOverlay);
       $('pr-go').addEventListener('click', generate);
+      var gba = $('pr-go-area'); if (gba) gba.addEventListener('click', generateByArea);
       $('pr-hearted').addEventListener('change', renderBuilder);
       $('pr-wm').addEventListener('change', function () { try { localStorage.setItem('rw_export_watermark', $('pr-wm').checked ? '1' : '0'); } catch (e) {} });
       $('pr-pagenums').addEventListener('change', function () { try { localStorage.setItem('rw_report_pagenums', $('pr-pagenums').checked ? '1' : '0'); } catch (e) {} });
