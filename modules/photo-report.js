@@ -183,6 +183,7 @@
   // team's current guidance. Edited in-app; stored per machine in localStorage.
   var RUBRIC_DEFAULT = [
     'Pavement photo caption style (edit to update for the team):',
+    '- Length: keep each caption to ~2 lines in the report (3 only if truly needed) so text clears the footer. Be concise.',
     '- Short: ~1-2 sentences or a tight phrase list. Technical pavement-engineer voice; vary the wording; do not use the word "centroid".',
     '- Surface types: dense mix asphalt (HMA), Portland cement concrete (PCC), gravel, pervious pavers, chip seal (coarse/fine), microsurfacing, crackseal. Do not infer age from color.',
     '- Distresses (name only what is visible, with low/med/high severity): edge drop-off, edge cracking, L&T (longitudinal & transverse) cracking, block cracking, alligator cracking, depressions, rutting, weathering, raveling. Flag existing and needed patching.',
@@ -987,7 +988,10 @@
       '.wm div{line-height:1.45;white-space:pre}' +
       '.wm .wm0{font-weight:800;font-size:9.5px;letter-spacing:.4px}' +
       // typed description — centered under its image (never over the data)
-      '.cap{text-align:center;font:600 10.7px "IBM Plex Sans",system-ui;color:#1A1D22;line-height:1.28;padding:0 6px;white-space:normal;overflow-wrap:anywhere}' +
+      // Cap the caption at 3 printed lines so a long one can never run over the
+      // footer; captions should be AUTHORED to ~2 lines (see rubric). The full
+      // text still round-trips through the CSV — only the printed box is clamped.
+      '.cap{text-align:center;font:600 10.7px "IBM Plex Sans",system-ui;color:#1A1D22;line-height:1.28;padding:0 6px;white-space:normal;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}' +
       // footer: AECOM logo (bottom-left) + Route ID over Page N of X (bottom-right)
       '.pftr{flex:0 0 auto;display:flex;justify-content:space-between;align-items:flex-end;border-top:1pt solid #c7ccd2;margin-top:0.06in;padding-top:4px}' +
       '.pftr .ftr-logo{height:16px;width:auto;object-fit:contain}' +
