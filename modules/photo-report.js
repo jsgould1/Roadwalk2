@@ -711,6 +711,20 @@
     }
     status('Preparing ' + total + ' photo(s)…');
 
+    // Open the print window NOW — synchronously inside the click — so the
+    // browser counts it as user-initiated and doesn't block the pop-up. It is
+    // filled later (openPrint), after the async image load. Opening it after
+    // the awaits gets blocked on a large section (the load outlasts the click
+    // grace), which is why "Opened print view" showed but nothing appeared.
+    var printWin = null;
+    try { printWin = window.open('', '_blank'); } catch (e) {}
+    if (!printWin) { status('Pop-up blocked — allow pop-ups for this site, then click Generate PDF again.'); return; }
+    try {
+      printWin.document.write('<!doctype html><meta charset="utf-8"><title>RoadWalk Photo Report</title>' +
+        '<body style="margin:0;font:600 15px system-ui;color:#333;background:#fbfaf6;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;padding:24px">' +
+        '<div>Preparing photo report…<br><span style="font-weight:400;color:#777">building ' + total + ' photos — this can take a moment for a large section</span></div></body>');
+    } catch (e) {}
+
     // Fill STA/MP for photos tagged before station support (route geometry is
     // already cached after tagging; station() returns null if not yet built).
     if (window.RW2PhotoTag && window.RW2PhotoTag.station) {
@@ -760,8 +774,8 @@
               secTitle: s.title, routeId: routeId, pageIdx: pi + 1, pageCount: pages.length, rows: pageRows, img: img, wmOn: wmOn, pageNums: pageNums });
           });
         });
-        if (!pagesHtml) { status('No printable images (all offloaded with no stored copy?).'); return; }
-        openPrint(pagesHtml);
+        if (!pagesHtml) { try { printWin.close(); } catch (e) {} status('No printable images (all offloaded with no stored copy?).'); return; }
+        openPrint(pagesHtml, printWin);
         status('Opened print view' + (missing ? ' · ' + missing + ' photo(s) had no image' : '') + '. Use "Save as PDF".');
       });
   }
@@ -879,8 +893,10 @@
       '</div></section>';
   }
 
-  function openPrint(pagesHtml) {
-    var w = window.open('', '_blank');
+  function openPrint(pagesHtml, w) {
+    // Prefer a window opened synchronously at click time (passed in) so the
+    // pop-up isn't blocked after the async image load; fall back to opening now.
+    if (!w) { w = window.open('', '_blank'); }
     if (!w) { status('Pop-up blocked — allow pop-ups to print the report.'); return; }
     var css =
       // Narrower bottom margin drops the footer to ~0.22in from the sheet edge
@@ -932,11 +948,21 @@
       '.pftr .ftr-aecom{font:800 12px "IBM Plex Sans",system-ui;color:#16315E;letter-spacing:1px}' +
       '.pftr-r{display:flex;flex-direction:column;align-items:flex-end;gap:1px;font:600 9px "IBM Plex Mono",monospace;color:#5b6673;letter-spacing:.3px}' +
       '.pftr-r .rid{font-weight:800;color:#16315E;font-size:10px}';
-    w.document.open();
-    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>RoadWalk Photo Report</title><style>' + css + '</style></head><body>' + pagesHtml + '</body></html>');
-    w.document.close();
-    // give the data-URL images a tick to paint, then invoke print
-    setTimeout(function () { try { w.focus(); w.print(); } catch (e) {} }, 400);
+    // A big report (hundreds of inlined images) is tens of MB of HTML, which
+    // document.write handles poorly. Navigate the window to a Blob URL instead
+    // and let the loaded page print itself once its images have painted.
+    var html = '<!doctype html><html><head><meta charset="utf-8"><title>RoadWalk Photo Report</title><style>' + css + '</style></head><body>' +
+      pagesHtml +
+      '<script>window.addEventListener("load",function(){setTimeout(function(){try{window.focus();window.print();}catch(e){}},600);});<\/script>' +
+      '</body></html>';
+    try {
+      var url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+      w.location.href = url;
+      setTimeout(function () { try { URL.revokeObjectURL(url); } catch (e) {} }, 120000);
+    } catch (e) {
+      try { w.document.open(); w.document.write(html); w.document.close();
+        setTimeout(function () { try { w.focus(); w.print(); } catch (e2) {} }, 600); } catch (e3) {}
+    }
   }
 
   // ---- builder overlay -------------------------------------------------------
