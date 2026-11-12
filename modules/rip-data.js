@@ -832,11 +832,11 @@
         + ' · <span data-rip-hcount="' + esc(k) + '">♥ ' + hearted + '</span></span></div>'
         + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(' + sz.m + 'px,1fr));gap:8px">';
       g.photos.forEach((p) => {
-        const src = p.dataUrl || OFF;
+        const lazy = !!p.dataUrl;   // defer loaded thumbnails to scroll; offloaded photos show the placeholder now
         const cap = (p.description || '');
         html += '<div data-rip-card="' + esc(p.id) + '" '
           + 'style="position:relative;border:1px solid #e3e8ee;border-radius:7px;overflow:hidden;background:#fff' + (p.hearted ? ';box-shadow:0 0 0 2px #C85A2B' : '') + '">'
-          + '<div data-rip-go="' + esc(p.id) + '" title="Jump to this photo on the map" style="height:' + sz.h + 'px;cursor:pointer;background:#f4f1e8 center/cover no-repeat;background-image:url(' + src + ')"></div>'
+          + '<div data-rip-go="' + esc(p.id) + '"' + (lazy ? ' data-lazy="1"' : '') + ' title="Jump to this photo on the map" style="height:' + sz.h + 'px;cursor:pointer;background:#f4f1e8 center/cover no-repeat' + (lazy ? '' : ';background-image:url(' + OFF + ')') + '"></div>'
           + '<div style="position:absolute;top:4px;right:4px;display:flex;gap:4px">'
           + '<button data-rip-heart="' + esc(p.id) + '" title="Heart = include in photo report" style="' + BTN
           + (p.hearted ? ';background:#C85A2B;color:#fff' : ';background:rgba(255,255,255,.92);color:#C85A2B') + '">' + (p.hearted ? '♥' : '♡') + '</button>'
@@ -1401,6 +1401,17 @@
     // Photos tab — thumbnail click → open the image in a lightbox (view large,
     // open in a new tab, or save). Map-jump lives on a button in the lightbox.
     const photoGet = (id) => { const api = window._RW && window._RW.geophotos; return api && api.get && api.get(id); };
+    // Photos tab — lazy-load thumbnails. A large loaded bundle would otherwise
+    // inline hundreds of MB of data-URLs into one HTML string and freeze the tab
+    // on open. Images paint as their cards scroll near the viewport.
+    const _lazyEls = host.querySelectorAll('[data-lazy="1"]');
+    if (_lazyEls.length) {
+      const loadBg = (el) => { const p = photoGet(el.getAttribute('data-rip-go')); const d = p && p.dataUrl; if (d) el.style.backgroundImage = 'url(' + d + ')'; el.removeAttribute('data-lazy'); };
+      if ('IntersectionObserver' in window) {
+        const io = new IntersectionObserver((ents) => { ents.forEach((e) => { if (e.isIntersecting) { loadBg(e.target); io.unobserve(e.target); } }); }, { rootMargin: '400px' });
+        _lazyEls.forEach((el) => io.observe(el));
+      } else { _lazyEls.forEach(loadBg); }
+    }
     host.querySelectorAll('[data-rip-go]').forEach((el) => {
       el.onclick = () => openLightbox(el.getAttribute('data-rip-go'));
       // Hover → floating magnified preview, but only over the central 50% of the
