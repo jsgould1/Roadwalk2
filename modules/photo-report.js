@@ -1013,8 +1013,7 @@
       '.phdr .sc .sc-nm{font-weight:700;font-size:14px;color:#5b6673;white-space:normal}' +
       '.grid{flex:1 1 auto;display:flex;flex-direction:column;gap:0.12in;min-height:0;justify-content:flex-start}' +
       '.prow{flex:0 0 auto;display:flex;flex-direction:column}' +
-      '.prow-imgs{display:flex;gap:8pt;justify-content:flex-start;align-items:flex-start}' +
-      '.prow.full .prow-imgs{justify-content:center}' +
+      '.prow-imgs{display:flex;gap:8pt;justify-content:center;align-items:flex-start}' +
       '.pcell{display:flex;flex-direction:column;align-items:center}' +
       '.prow:not(.full) .pcell{width:46%}' +
       '.prow.full .pcell{width:72%}' +
