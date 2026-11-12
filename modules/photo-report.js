@@ -900,7 +900,7 @@
   function loadAreaMap() {
     if (_areaMap) return Promise.resolve(_areaMap);
     if (_areaMapP) return _areaMapP;
-    _areaMapP = fetch('area-map.json?v=56', { cache: 'no-cache' })
+    _areaMapP = fetch('area-map.json?v=57', { cache: 'no-cache' })
       .then(function (r) { return r.ok ? r.json() : {}; })
       .then(function (j) { _areaMap = j || {}; return _areaMap; })
       .catch(function () { _areaMap = {}; return _areaMap; });

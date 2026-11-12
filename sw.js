@@ -10,7 +10,7 @@
    ---------------------------------------------------------------- */
 'use strict';
 
-var CACHE_VERSION = 'roadwalk2-v4';   // namespaced (shares github.io origin w/ legacy RoadWalk SW)
+var CACHE_VERSION = 'roadwalk2-v5';   // namespaced (shares github.io origin w/ legacy RoadWalk SW)
 
 // Pre-cached on install so the app opens even on a fully cold start.
 var PRECACHE = ['./', './index.html'];

@@ -35,6 +35,7 @@
 "CAHA-0240": "3A",
 "CAHA-0241": "4B",
 "CAHA-0250": "3A",
+"CAHA-0280": "2B",
 "CAHA-0285": "3A",
 "CAHA-0400": "1A",
 "CAHA-0405": "1A",
@@ -128,6 +129,8 @@
 "lot:CAHA-0969": "1B",
 "lot:CAHA-0970": "1B",
 "lot:CAHA-0971": "1A",
+"lot:CAHA-0972AZ": "2B",
+"lot:CAHA-0972BZ": "2B",
 "lot:CAHA-0983": "1A"
 }
 }
