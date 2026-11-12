@@ -95,7 +95,10 @@
     });
     porder.sort(function (a, b) { if (a === '(untagged)') return 1; if (b === '(untagged)') return -1; return a < b ? -1 : 1; });
     if (!porder.length) { host.innerHTML = '<div class="prt-h">Routes to print</div><div class="prt-empty">No hearted photos yet.</div>'; return; }
-    var html = '<div class="prt-h">Routes to print</div>';
+    var html = '<div class="prt-h">Routes to print' +
+      '<span class="prt-allnone" style="float:right;font-weight:400;font-size:11px">' +
+      '<a href="#" data-all="1" style="color:#0B3D66;text-decoration:none">all</a> · ' +
+      '<a href="#" data-all="0" style="color:#0B3D66;text-decoration:none">none</a></span></div>';
     porder.forEach(function (code) {
       var pk = parks[code];
       var selN = pk.secs.filter(function (s) { return _sel[s.key]; }).length;
@@ -109,6 +112,14 @@
       html += '</div></div>';
     });
     host.innerHTML = html;
+    Array.prototype.forEach.call(host.querySelectorAll('.prt-allnone a'), function (a) {
+      a.addEventListener('click', function (e) {
+        e.preventDefault();
+        var on = a.getAttribute('data-all') === '1';
+        secs.forEach(function (s) { _sel[s.key] = on; });
+        prRefresh();
+      });
+    });
     Array.prototype.forEach.call(host.querySelectorAll('.prt-pk'), function (cb) {
       var pk = parks[cb.getAttribute('data-pk')];
       var selN = pk.secs.filter(function (s) { return _sel[s.key]; }).length;
@@ -667,6 +678,29 @@
     return pages;
   }
 
+  // Resolve items through fn with at most `limit` in flight, so a big print
+  // (hundreds of photos) doesn't spawn hundreds of simultaneous Image+canvas
+  // decodes and freeze the tab. Results come back in input order.
+  function mapLimit(items, limit, fn, onProgress) {
+    return new Promise(function (resolve) {
+      var out = new Array(items.length), next = 0, done = 0, active = 0;
+      if (!items.length) { resolve(out); return; }
+      function pump() {
+        while (active < limit && next < items.length) {
+          (function (idx) {
+            active++;
+            Promise.resolve(fn(items[idx], idx)).then(function (v) {
+              out[idx] = v; active--; done++;
+              if (onProgress) { try { onProgress(done, items.length); } catch (e) {} }
+              if (done === items.length) resolve(out); else pump();
+            });
+          })(next++);
+        }
+      }
+      pump();
+    });
+  }
+
   // ---- PDF (print window) ----------------------------------------------------
   function generate() {
     var secs = selectedSections(grouped(true));
@@ -693,7 +727,9 @@
       fetchLogoFile('aecom-logo-black.png'),
       fetchLogoFile('nps-logo.png'),
       loadParkNames(),
-      Promise.all(ids.map(function (id) { return imageFor(id).then(downscaleForPrint).then(function (d) { return { id: id, d: d }; }); })),
+      mapLimit(ids, 6, function (id) {
+        return imageFor(id).then(downscaleForPrint).then(function (d) { return { id: id, d: d }; });
+      }, function (n, t) { status('Preparing images… ' + n + ' / ' + t); }),
     ]).then(function (all) {
         var blackLogo = all[0], npsLogo = all[1], res = all[3];
         var img = {}; var missing = 0;
