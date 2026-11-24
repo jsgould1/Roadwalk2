@@ -643,6 +643,120 @@
     });
   }
 
+  // ---- bearing-based "facing off-road → parking lot" detection ---------------
+  // Photos shot FROM the travel way but AIMED at adjacent parking get auto-tagged
+  // to the road (nearest centerline). The camera's EXIF compass bearing (p.bearing,
+  // deg CW from north) tells us where it was actually looking: if that's roughly
+  // perpendicular to the road AND a look-ahead point down the bearing lands inside
+  // a parking-lot polygon, the shot is of the lot — so re-pin it there.
+  function segHeadingDeg(aLat, aLng, bLat, bLng) {
+    var mLat = (aLat + bLat) / 2 * Math.PI / 180;
+    var dN = (bLat - aLat), dE = (bLng - aLng) * Math.cos(mLat);
+    return (Math.atan2(dE, dN) * 180 / Math.PI + 360) % 360;
+  }
+  function closestSeg(lat, lng, route) {
+    var best = Infinity, seg = null;
+    for (var pi = 0; pi < route.paths.length; pi++) {
+      var path = route.paths[pi];
+      for (var i = 0; i + 1 < path.length; i++) {
+        var a = path[i], b = path[i + 1];
+        var c = closestOnSeg(lat, lng, a[0], a[1], b[0], b[1]);
+        if (c.d < best) { best = c.d; seg = [a[0], a[1], b[0], b[1]]; }
+      }
+    }
+    return seg;
+  }
+  // Heading (deg CW from N) of the route centerline nearest the point, or null.
+  function roadBearingAt(lat, lng, ident) {
+    var r = routeByIdent(ident); if (!r) return null;
+    var s = closestSeg(lat, lng, r); if (!s) return null;
+    return segHeadingDeg(s[0], s[1], s[2], s[3]);
+  }
+  // Project [lat,lng] distFt along a compass bearing (deg CW from N).
+  function offsetLatLng(lat, lng, brgDeg, ft) {
+    var br = brgDeg * Math.PI / 180;
+    return [lat + (Math.cos(br) * ft) / FT_PER_DEG_LAT,
+            lng + (Math.sin(br) * ft) / ftPerDegLng(lat)];
+  }
+  // Acute angle (0=parallel .. 90=perpendicular) between a camera bearing and the
+  // undirected road line.
+  function offAxisDeg(camBrg, roadBrg) {
+    var d = Math.abs(((camBrg - roadBrg + 180) % 360 + 360) % 360 - 180); // 0..180
+    return Math.min(d, 180 - d);
+  }
+  // Which lot (if any) the camera is looking into, by probing points down the
+  // bearing at several distances. Returns the lot object or null.
+  function lotAhead(lat, lng, camBrg, probes) {
+    for (var pr = 0; pr < probes.length; pr++) {
+      var q = offsetLatLng(lat, lng, camBrg, probes[pr]);
+      for (var li = 0; li < LOTS.length; li++) {
+        var L = LOTS[li];
+        if (!nearBbox(q[0], q[1], L.bb, 5)) continue;
+        for (var ri = 0; ri < L.rings.length; ri++) if (pointInRing(q[0], q[1], L.rings[ri])) return L;
+      }
+    }
+    return null;
+  }
+  // Inspect one photo: is it a road-tagged shot that's actually facing a lot?
+  // Returns {suspect, roadBrg, offAxis, lot} (lot = {ident,name} or null).
+  function offRoadInfo(p, opts) {
+    opts = opts || {};
+    var angleTol = opts.angleTol != null ? opts.angleTol : 35;
+    var probes = opts.probeFt || [15, 25, 35, 50];
+    var out = { suspect: false, roadBrg: null, offAxis: null, lot: null };
+    if (!p || !p.rip_route || (p.rip_lot && p.rip_lot_inside)) return out;
+    if (p.bearing == null || !isFinite(p.bearing)) return out;
+    var lat = Number(p.lat), lng = Number(p.lng);
+    if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) return out;
+    var rb = roadBearingAt(lat, lng, p.rip_route);
+    if (rb == null) return out;
+    out.roadBrg = Math.round(rb);
+    out.offAxis = Math.round(offAxisDeg(p.bearing, rb));
+    if (out.offAxis < 90 - angleTol) return out;       // not perpendicular enough
+    var L = lotAhead(lat, lng, p.bearing, probes);
+    if (L) { out.lot = { ident: L.ident, name: L.name }; out.suspect = true; }
+    return out;
+  }
+
+  var _lastMoves = [];   // for one-step undo of the auto pass
+  // Auto re-pin every eligible road-tagged photo that's facing a lot. Locks each
+  // moved photo (rip_manual) and records the move so it can be undone.
+  function autoRepinByBearing(opts) {
+    opts = opts || {};
+    var g = geo();
+    if (!g) return Promise.resolve({ ok: false, reason: 'Field photos module not available.' });
+    if (!rip() || !rip().hasPark || !rip().hasPark()) {
+      return Promise.resolve({ ok: false, reason: 'Open an NPS park first (RIP) so there are lots to re-pin to.' });
+    }
+    return ensureGeo(false).then(function () {
+      if (!LOTS.length) return { ok: true, moved: 0, moves: [], note: 'no parking lots in this park' };
+      var list = g.list(), moves = [];
+      for (var i = 0; i < list.length; i++) {
+        var p = list[i];
+        if (!p.dataUrl || p.rip_manual) continue;      // offloaded or locked — leave alone
+        var info = offRoadInfo(p, opts);
+        if (info.suspect) moves.push({ id: p.id, fromRoute: p.rip_route, fromRouteName: p.rip_route_name || '',
+          toLot: info.lot.ident, toLotName: info.lot.name || '', bearing: Math.round(p.bearing),
+          roadBrg: info.roadBrg, offAxis: info.offAxis });
+      }
+      // Apply sequentially so each save/refresh settles before the next.
+      var chain = Promise.resolve();
+      moves.forEach(function (m) { chain = chain.then(function () { return assignTarget(m.id, m.toLot, 'lot'); }); });
+      return chain.then(function () {
+        _lastMoves = moves.slice();
+        try { g.refresh(); } catch (e) {}
+        return { ok: true, moved: moves.length, moves: moves };
+      });
+    });
+  }
+  // Undo the last auto pass: clear the manual lock (reverts each to its GPS auto-tag).
+  function undoAutoRepin() {
+    var moves = _lastMoves.slice(); _lastMoves = [];
+    var chain = Promise.resolve();
+    moves.forEach(function (m) { chain = chain.then(function () { return clearManual(m.id); }); });
+    return chain.then(function () { var g = geo(); if (g) try { g.refresh(); } catch (e) {} return moves.length; });
+  }
+
   // ---- public API ------------------------------------------------------------
   window.RW2PhotoTag = {
     tagPhotos: tagPhotos,
@@ -650,6 +764,7 @@
     ensureGeo: ensureGeo,
     station: station,
     assignTarget: assignTarget, clearManual: clearManual, targetsList: targetsList, assignUI: assignUI,
+    offRoadInfo: offRoadInfo, roadBearingAt: roadBearingAt, autoRepinByBearing: autoRepinByBearing, undoAutoRepin: undoAutoRepin,
     nearbyRoutes: nearbyRoutes,
     nearbyLots: nearbyLots,
     counts: function () { return { routes: ROUTES.length, lots: LOTS.length, builtFor: _builtFor }; },
