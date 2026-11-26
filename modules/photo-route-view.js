@@ -19,7 +19,12 @@
   var ALL = '__all__', UNTAGGED = '__untagged__';
   var routeFilter = ALL;
 
+  // A photo is "loaded" only while its image data is in RAM; offloading a set
+  // deletes p.dataUrl (photo-sets.js). This view shows loaded photos only.
+  function isLoaded(p) { return !!(p && p.dataUrl); }
+
   function matches(p) {
+    if (!isLoaded(p)) return false;               // hide offloaded photos in this view
     if (routeFilter === ALL) return true;
     if (routeFilter === UNTAGGED) return !p.rip_route && !p.rip_lot;
     if (routeFilter.indexOf('lot:') === 0) return p.rip_lot === routeFilter.slice(4);
@@ -57,6 +62,7 @@
     var sel = $('prv-select'); if (!sel) return;
     var g = geo(); var counts = {}, lots = {}, untagged = 0, nameOf = {}, lotName = {};
     (g ? g.list() : []).forEach(function (p) {
+      if (!isLoaded(p)) return;                         // list only loaded parks/routes
       var insideLot = p.rip_lot && p.rip_lot_inside;   // inside a lot wins over road proximity
       if (!insideLot && p.rip_route) { counts[p.rip_route] = (counts[p.rip_route] || 0) + 1; if (!nameOf[p.rip_route]) nameOf[p.rip_route] = p.rip_route_name || ''; }
       else if (p.rip_lot) { lots[p.rip_lot] = (lots[p.rip_lot] || 0) + 1; if (!lotName[p.rip_lot]) lotName[p.rip_lot] = p.rip_lot_name || ''; }

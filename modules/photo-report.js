@@ -1187,7 +1187,11 @@
       });
       var asg = card.querySelector('.pr-assign');
       if (asg) asg.addEventListener('click', function () {
-        if (window.RW2PhotoTag && window.RW2PhotoTag.assignUI) window.RW2PhotoTag.assignUI(id, function () { renderBuilder(); });
+        if (window.RW2PhotoTag && window.RW2PhotoTag.assignUI) window.RW2PhotoTag.assignUI(id, function () {
+          var sc = $('pr-body'), y = sc ? sc.scrollTop : 0;   // remember where the user was
+          renderBuilder();
+          var sc2 = $('pr-body'); if (sc2) sc2.scrollTop = y; // restore, don't jump to the first photo
+        });
         else status('Assign unavailable (auto-tag module not loaded).');
       });
       var cap = card.querySelector('.pr-cap');
