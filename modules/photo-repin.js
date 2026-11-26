@@ -70,7 +70,10 @@
       '#rpn-card .hd button{font:600 12px system-ui;padding:6px 10px;border-radius:7px;border:1px solid var(--rule,#DDD7C8);background:#fff;cursor:pointer}' +
       '#rpn-card .hd button.go{background:var(--orange,#C85A2B);color:#fff;border-color:var(--orange,#C85A2B)}' +
       '#rpn-card .hd button:disabled{opacity:.5;cursor:not-allowed}' +
-      '#rpn-grid{overflow:auto;padding:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}' +
+      '#rpn-card .hd{flex:0 0 auto}' +
+      // flex:1 + min-height:0 lets the grid SCROLL inside the 90vh card instead of
+      // overflowing it when a route has hundreds of photos.
+      '#rpn-grid{flex:1 1 auto;min-height:0;overflow-y:auto;padding:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}' +
       '.rpn-cell{position:relative;border:2px solid transparent;border-radius:9px;overflow:hidden;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.12);cursor:pointer}' +
       '.rpn-cell.sel{border-color:var(--orange,#C85A2B)}' +
       '.rpn-cell.suspect{box-shadow:0 0 0 2px #f2b705 inset}' +
