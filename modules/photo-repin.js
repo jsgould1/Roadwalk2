@@ -84,6 +84,11 @@
       '.rpn-cell.sel .ck{background:var(--orange,#C85A2B);color:#fff;border-color:var(--orange,#C85A2B)}' +
       '.rpn-cell .brg{position:absolute;top:5px;right:5px;width:22px;height:22px;border-radius:50%;background:rgba(18,35,59,.78)}' +
       '.rpn-cell .brg svg{display:block}' +
+      '.rpn-cell:hover{box-shadow:0 2px 10px rgba(0,0,0,.28)}' +
+      // floating hover preview (full, uncropped image shown large beside the grid)
+      '#rpn-prev{position:fixed;z-index:5300;pointer-events:none;display:none;border-radius:10px;overflow:hidden;background:#000;border:2px solid #fff;box-shadow:0 12px 44px rgba(0,0,0,.5)}' +
+      '#rpn-prev img{display:block;max-width:46vw;max-height:76vh;width:auto;height:auto}' +
+      '#rpn-prev .pcap{position:absolute;left:0;right:0;bottom:0;padding:5px 9px;font:700 11px system-ui;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.72));text-shadow:0 1px 2px #000}' +
       '#rpn-empty{padding:30px;text-align:center;color:#8a949f;font:600 13px system-ui}' +
       // batch target picker
       '#rpn-pick{position:fixed;inset:0;z-index:5100;background:rgba(16,20,28,.5);display:none;align-items:center;justify-content:center}' +
@@ -123,8 +128,43 @@
     return { shown: shown, offloaded: offloaded };
   }
 
+  // ---- hover preview ---------------------------------------------------------
+  var prevEl = null;
+  function hidePrev() { if (prevEl) prevEl.style.display = 'none'; }
+  function positionPrev(cell) {
+    if (!prevEl) return;
+    var r = cell.getBoundingClientRect(), pr = prevEl.getBoundingClientRect(), gap = 14;
+    var left = r.right + gap;
+    if (left + pr.width > window.innerWidth - 8) left = r.left - gap - pr.width; // flip to the left
+    if (left < 8) left = Math.max(8, (window.innerWidth - pr.width) / 2);        // last resort: center
+    var top = r.top + r.height / 2 - pr.height / 2;
+    top = Math.max(8, Math.min(top, window.innerHeight - pr.height - 8));
+    prevEl.style.left = Math.round(left) + 'px';
+    prevEl.style.top = Math.round(top) + 'px';
+  }
+  function showPrev(cell) {
+    var img = cell.querySelector('img'); if (!img || !img.getAttribute('src')) return;
+    if (!prevEl) {
+      prevEl = document.createElement('div'); prevEl.id = 'rpn-prev';
+      prevEl.innerHTML = '<img alt=""><div class="pcap"></div>';
+      document.body.appendChild(prevEl);
+      prevEl.querySelector('img').addEventListener('load', function () {
+        if (prevEl._cell && prevEl.style.display !== 'none') positionPrev(prevEl._cell);
+      });
+    }
+    var pimg = prevEl.querySelector('img'), src = img.getAttribute('src');
+    if (pimg.getAttribute('src') !== src) pimg.setAttribute('src', src);
+    var idEl = cell.querySelector('.cap .id');
+    prevEl.querySelector('.pcap').textContent = idEl ? idEl.textContent : '';
+    prevEl._cell = cell;
+    prevEl.style.display = 'block';
+    positionPrev(cell);                              // place now (cached image)
+    requestAnimationFrame(function () { if (prevEl.style.display !== 'none') positionPrev(cell); });
+  }
+
   function renderGrid() {
     var grid = $('rpn-grid'); if (!grid) return;
+    hidePrev();
     var res = eligiblePhotos(), T = tag();
     var f = curFilter();
     var label = f === ALL ? 'all routes & lots' : f === UNTAGGED ? 'untagged' : f.indexOf('lot:') === 0 ? 'lot ' + f.slice(4) : f;
@@ -182,13 +222,21 @@
         renderGrid();
       };
       $('rpn-assign').onclick = openPicker;
-      $('rpn-grid').addEventListener('click', function (e) {
+      var grid = $('rpn-grid');
+      grid.addEventListener('click', function (e) {
         var cell = e.target.closest ? e.target.closest('.rpn-cell') : null; if (!cell) return;
         var id = cell.getAttribute('data-id');
         if (selected[id]) delete selected[id]; else selected[id] = true;
         cell.classList.toggle('sel'); cell.querySelector('.ck').textContent = selected[id] ? '✓' : '';
         updateCount();
       });
+      // hover preview: enlarge the hovered thumbnail beside the grid
+      grid.addEventListener('mouseover', function (e) {
+        var cell = e.target.closest ? e.target.closest('.rpn-cell') : null; if (cell) showPrev(cell);
+      });
+      grid.addEventListener('mouseleave', hidePrev);
+      grid.addEventListener('scroll', hidePrev);
+      ov.addEventListener('click', hidePrev, true);   // hide while clicking/closing
     }
     selected = {};
     ov.classList.add('on');
